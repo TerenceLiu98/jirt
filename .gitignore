@@ -27,6 +27,8 @@ coverage.xml
 /data/
 /outputs/
 /runtime-comparison.json
+/numerical-errors.json
+/validation-results.json
 
 # Machine-specific and local agent files
 .DS_Store

@@ -20,7 +20,7 @@ validation, missing/constant observations, zero counts and extreme normal tails.
 The consolidated full-data audit passes for all six models, including the
 ordinal tail-precision improvement. Every check compares all returned means and
 variances, iteration counts and convergence status. The 60-test suite also passes.
-[validation-results.json](validation-results.json) records the audit output and
+The local report `outputs/real-validation.json` records the audit output and
 SHA-256 hashes of the tested source and baselines. Large input files and detailed
 reports under `outputs/` are local artifacts and are not shipped in the package.
 
