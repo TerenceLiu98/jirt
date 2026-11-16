@@ -1,23 +1,33 @@
-docs/
-references/
-
+# Python bytecode and tool caches
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Local environments and secrets
 .venv/
 .env
-.DS_Store
-# 数据和输出不进仓库
-data/
-outputs/
-# LaTeX 编译产物
-paper/**/*.aux
-paper/**/*.bbl
-paper/**/*.blg
-paper/**/*.fdb_latexmk
-paper/**/*.fls
-paper/**/*.log
-paper/**/*.out
-paper/**/*.synctex.gz
-paper/**/*.pdf
+.env.*
+!.env.example
 
+# Build and distribution artifacts
+build/
+dist/
+*.egg-info/
+
+# Coverage reports
+.coverage
+.coverage.*
+htmlcov/
+coverage.xml
+
+# Local reference material, datasets and generated results
+/references/
+/data/
+/outputs/
+/runtime-comparison.json
+
+# Machine-specific and local agent files
+.DS_Store
 AGENTS.md
