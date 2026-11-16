@@ -49,7 +49,7 @@ print(result.means["x"], result.converged)
 | `dyn_irt` | $P(Y_{ij}=1)=\Phi(\alpha_j+\beta_j x_{i,t_j})$; $x_{i,t}=x_{i,t-1}+\epsilon_{i,t}$, $\epsilon_{i,t}\sim N(0,\omega_i^2)$ | Subject × item votes, -1/1; 0 missing; item periods and inclusive subject tenures | `x` by subject and period, `alpha`, `beta`; fixed diffusion variance `omega2` |
 | `hier_irt` | $P(Y_{ij}=1)=\Phi(\alpha_j+\beta_j x_i)$; $x_i=z_i^\top\gamma_{g_i}+\eta_i$ | Indexed votes, -1/1; 0 missing; subject groups and covariates | `gamma`, `eta`, `sigma` (residual variance), `x_implied`, `alpha`, `beta` |
 | `network_irt` | $P(Y_{ij}=1)=\Phi(\alpha_j+\beta_i-\gamma(\theta_i-w_j)^2)$ | Subject × item edges, 0/1; NaN missing | `alpha`, `beta`, `w`, `theta`; fixed input `gamma` |
-| `pois_irt` | $Y_{jk}\sim\operatorname{Poisson}(\lambda_{jk})$; $\log\lambda_{jk}=\alpha_k+\psi_j+\beta_j x_{s(k)}$ | Term × document nonnegative counts; optional document-to-subject mapping | `alpha`, `psi`, `beta`, `x` |
+| `pois_irt` | $Y_{jk}\sim\mathrm{Poisson}(\lambda_{jk})$; $\log\lambda_{jk}=\alpha_k+\psi_j+\beta_j x_{s(k)}$ | Term × document nonnegative counts; optional document-to-subject mapping | `alpha`, `psi`, `beta`, `x` |
 
 Here $\Phi$ is the standard normal cumulative distribution function. These are
 conditional response formulas given the model parameters. In the first five
