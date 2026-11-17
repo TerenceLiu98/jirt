@@ -664,3 +664,46 @@ References: Junker & Sijtsma (2001),
 [doi:10.1177/01466210122032064](https://doi.org/10.1177/01466210122032064);
 Templin & Henson (2006),
 [doi:10.1037/1082-989X.11.3.287](https://doi.org/10.1037/1082-989X.11.3.287).
+
+## Content-amortized 1PL: unseen items
+
+`examples/amortized.py` generates 80 items with four local synthetic content
+features and 1,200 persons. A fixed-seed item permutation holds out **20 entire
+items**, fitting on the other 60. Encoder standardization, encoder training and
+ability scoring only use training items/responses. The held-out response matrix
+is used solely for final evaluation. Both predictors use plug-in training EAPs.
+
+| Method | Held-out-item response log loss |
+| --- | ---: |
+| Affine content encoder, unit slope | 0.484974 |
+| Non-amortized Rasch/1PL with training-mean difficulty fallback | 0.639290 |
+
+Held-out content-based difficulty RMSE is 0.014460. The ordinary baseline fits
+free training-item difficulties using `logistic_irt(model="rasch")`. It cannot
+calibrate an unseen item without responses; assigning the mean **training**
+difficulty is an explicit cold-start fallback. No held-out difficulty or ability
+is fitted to test responses. This comparison isolates the value of informative
+content on a known affine synthetic relationship, not general real-world
+superiority or evidence that the nonlinear encoder is always preferable.
+
+Tests check the entire-item split and log loss, explicit-key reproducibility,
+feature-row realignment by IDs, rejection of mismatched IDs, frozen training
+preprocessing, missing responses, prior recovery for all-missing persons and
+both affine/nonlinear fitting. A separate NumPy/SciPy BFGS implementation directly
+computes the affine marginal objective with numerical derivatives and matching
+quadrature/regularization, checking objective and difficulty agreement without
+calling the JAX likelihood kernel. The tanh model is tested for fitting/prediction;
+the reported held-out benchmark uses the affine encoder. Architecture/objective
+differences from the local py-irt `amortized_1pl` are documented in API.md.
+
+```sh
+uv run pytest tests/test_amortized.py
+uv run python examples/amortized.py
+```
+
+Method context: Truong et al. (2025), *Reliable and Efficient Amortized Model-based
+Evaluation*, [PMLR 267](https://proceedings.mlr.press/v267/truong25c.html).
+This is a content-based calibration reference, not a claim about the origin of
+py-irt's implementation. Kingma & Welling's *Auto-Encoding Variational Bayes*
+provides the general variational-amortization foundation; the estimator here
+uses marginal MLE rather than that variational objective.

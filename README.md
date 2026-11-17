@@ -44,6 +44,7 @@ print(result.means["x"], result.converged)
 
 | Function | Formulas | Input | Main parameters |
 | --- | --- | --- | --- |
+| `amortized_irt` | $P(Y_{ij}=1)=\mathrm{sigmoid}(\theta_i-f_\phi(\mathbf x_j))$ | Binary responses; NaN missing; aligned item features and explicit random key | Shared encoder, content-only difficulty, EAP ability; affine or tanh network |
 | `diagnostic_irt` | $P(Y_{ij}=1)=g_j+(1-s_j-g_j)\eta_j(\alpha_i)$; DINA requires all skills, DINO any required skill | Binary responses; NaN missing; item × attribute Q matrix | `slip`, `guess`, profile weights, posterior profile and mastery probabilities |
 | `group_irt` | $P(Y_{ij}\ge k\mid g_i)=\mathrm{sigmoid}(a_{g_i j}(\theta_i-b_{g_i jk}))$; $\theta_i\mid g_i\sim N(\mu_{g_i},\sigma_{g_i}^2)$ | Binary or ordered categories; NaN missing; observed group labels and sharing masks | Group `a`, `steps`, `mu`, `sigma`, EAP `x`; Rasch, 2PL or GRM |
 | `mixture_irt` | $P(\mathbf y_i)=\sum_c\pi_c P_c(\mathbf y_i)$; optional structural component $P_0(\mathbf y_i)=\mathbf1[\text{all observed responses}=0]$ | Binary or ordered categories; NaN missing; class count and starts | Class parameters, weights, posterior memberships; optional zero inflation |
@@ -111,6 +112,10 @@ zero inflation.
 `diagnostic_irt` estimates discrete skill mastery under DINA or DINO. Run
 `uv run python examples/diagnostic.py` for a reproducible diagnostic example.
 
+`amortized_irt` learns difficulty from aligned local item features and predicts
+unseen items without responses. Run `uv run python examples/amortized.py` for
+an entire-item holdout comparison against a non-amortized 1PL baseline.
+
 See [API.md](API.md) for parameter shapes and identification constraints.
 
 ## TODO
@@ -123,4 +128,4 @@ See [API.md](API.md) for parameter shapes and identification constraints.
 - [x] Unfolding models: unidimensional GGUM for binary and polytomous responses.
 - [x] Multiple-group and mixture IRT, including zero-inflated binary/graded responses.
 - [x] Cognitive diagnosis models: DINA and DINO.
-- [ ] Amortized IRT using item content.
+- [x] Amortized 1PL using item content.
