@@ -96,3 +96,30 @@ def test_overlapping_order_constraints():
     )
     assert fit.success, fit.message
     np.testing.assert_allclose(fit.x, [1.9, 2.0, 2.1], atol=1e-7)
+
+
+def test_dykstra_does_not_stop_on_a_stalled_feasible_point():
+    from jirt._optimize import _project
+
+    point, ok = jax.jit(_project)(
+        jnp.array([10.0, -10.0, -10.0]),
+        jnp.zeros(3),
+        jnp.ones(3),
+        jnp.array([[-1.0, 1.0, 0.0], [0.0, -1.0, 1.0]]),
+        jnp.full(2, 0.1),
+    )
+    assert ok
+    np.testing.assert_allclose(point, [0.0, 0.1, 0.2], atol=1e-8)
+
+
+def test_projection_exhaustion_is_not_reported_as_success():
+    from jirt._optimize import _project
+
+    _, ok = jax.jit(_project)(
+        jnp.array([100.0, -100.0, -100.0]),
+        jnp.zeros(3),
+        jnp.ones(3),
+        jnp.array([[-1.0, 1.0, 0.0], [0.0, -1.0, 1.0]]),
+        jnp.full(2, 0.1),
+    )
+    assert not ok

@@ -36,6 +36,7 @@ def _project(x, lower, upper, matrix, rhs, pairs=()):
 
     def cycle(carry):
         i, previous, box_correction, corrections, _ = carry
+        previous_box, previous_corrections = box_correction, corrections
         z = previous + box_correction
         point = jnp.clip(z, lower, upper)
         box_correction = z - point
@@ -51,7 +52,12 @@ def _project(x, lower, upper, matrix, rhs, pairs=()):
             jnp.max(jnp.maximum(lower - point, point - upper)),
             jnp.max(rhs - matrix @ point),
         )
-        done = (jnp.max(jnp.abs(point - previous)) <= 1e-10) & (violation <= 1e-10)
+        done = (
+            (jnp.max(jnp.abs(point - previous)) <= 1e-10)
+            & (jnp.max(jnp.abs(box_correction - previous_box)) <= 1e-10)
+            & (jnp.max(jnp.abs(corrections - previous_corrections)) <= 1e-10)
+            & (violation <= 1e-10)
+        )
         return i + 1, point, box_correction, corrections, done
 
     result = jax.lax.while_loop(
