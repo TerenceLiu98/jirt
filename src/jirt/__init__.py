@@ -1,5 +1,6 @@
 """Item response theory in Python and JAX."""
 
+from .amortized import AmortizedResult, amortized_irt
 from .binary import Control, FitResult, bin_irt
 from .bootstrap import BootstrapResult, bootstrap
 from .diagnostic import (
@@ -44,6 +45,8 @@ from .utilities import convert_votes, get_starts, make_priors, network_starts
 
 __version__ = "0.1.0"
 __all__ = [
+    "AmortizedResult",
+    "amortized_irt",
     "Control",
     "FitResult",
     "BootstrapResult",

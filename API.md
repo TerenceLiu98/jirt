@@ -534,3 +534,62 @@ All-missing persons recover the profile prior. Entirely missing items are
 rejected; partial missing responses contribute neither successes nor failures.
 `diagnostic_probabilities` is a pure differentiable JAX kernel; callers provide
 valid profiles, Q and parameter restrictions. See `examples/diagnostic.py`.
+
+## Content-amortized 1PL
+
+`amortized_irt(responses, item_features=..., item_ids=..., feature_item_ids=...,
+key=jax.random.key(seed), ...)` fits a shared content-to-difficulty mapping.
+Responses are binary `(N,J)` with NaN missing; features are finite `(J,F)` local
+vectors such as bag-of-words counts or precomputed embeddings. No remote service
+is required. Both ID sequences must contain the same unique string identifiers.
+Feature rows are reordered to the response-column IDs before fitting. Different
+or duplicated sets are rejected; extra held-out items cannot silently enter
+preprocessing. All training items need at least one observed response.
+
+Only pass training items to fitting. Feature means and population standard
+deviations are computed on these items and frozen. Constant/nearly constant
+features (SD <=1e-12) use scale one. Prediction never refits this transform.
+Any upstream vocabulary selection, embedding adaptation or feature selection
+must likewise use training data only; this API cannot detect upstream leakage.
+New feature rows must use the same feature-column schema/order as training.
+
+The model is `P(Y=1|theta,x)=sigmoid(theta-f_phi(x))`: discrimination is fixed
+to one (Rasch/1PL), and abilities have a fixed N(0,1) distribution. The default
+encoder has one `hidden_size=16` tanh layer and a scalar affine output;
+`hidden_size=0` uses a single affine map. There are no per-item residual offsets.
+New-item difficulty depends solely on features. `key` is required for random
+initialization; identical keys and inputs reproduce initialization and fitting.
+Full-batch L-BFGS-B is deterministic for a fixed numerical environment.
+
+The objective is mean negative person marginal log likelihood plus
+`l2/2 * sum(weight**2)` over encoder matrices/vectors, excluding biases.
+Abilities are integrated by Gauss–Hermite quadrature; this is penalized marginal
+MLE, **not variational inference**. It produces point item difficulties, not
+encoder-derived posterior means/variances or item uncertainty intervals.
+Controls: `l2=1e-4`, `quadrature_points=41`, `max_iter=1000`, `tolerance=1e-10`,
+`jit=True`. Enable JAX x64. Nonlinear encoders can have local optima; compare
+explicit keys/starts if needed. Check convergence and optimizer message.
+
+`AmortizedResult` retains `params`, frozen `feature_mean`/`feature_scale`, aligned
+`item_ids`, training `difficulty`, person EAP `ability` and conditional
+`ability_variance`. All-missing persons recover the quadrature prior.
+`log_likelihood` excludes the penalty; `objective` and `trace` include it.
+`infer_difficulty(new_features)` needs no responses or item IDs and preserves
+new feature-row order. `predict(new_features, theta=...)` returns
+subject-by-new-item probabilities; omitting theta uses training-person EAPs.
+These are plug-in predictions, not posterior-integrated response probabilities.
+For new persons, supply abilities estimated independently of evaluation answers.
+
+### Relation to the reference py-irt implementation
+
+The local `references/py-irt/py_irt/models/amortized_1pl.py` defines a PyTorch
+encoder with two softplus hidden layers, dropout, and separate batch-normalized
+location/log-variance heads for a normal difficulty guide. Its Pyro model also
+includes a multinomial item-content reconstruction decoder, normal latent
+abilities/difficulties and response observations; training uses SVI/Trace_ELBO.
+Here the encoder directly returns one deterministic difficulty, with no content
+reconstruction likelihood, dropout, batch normalization or variational guide.
+The normal ability distribution is integrated by quadrature. Consequently these
+implementations share the content-amortization idea but not their architecture,
+objective, uncertainty estimates or numerical targets. We do not claim parameter
+parity with py-irt or reproduce the cited paper's complete method.
