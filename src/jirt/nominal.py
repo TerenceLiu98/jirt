@@ -1,5 +1,7 @@
 """Nominal response and nested logistic distractor models."""
 
+from ._optimize import device_minimize
+
 import jax
 import jax.numpy as jnp
 
@@ -175,6 +177,7 @@ def nominal_irt(
     max_iter=1000,
     tolerance=1e-10,
     jit=True,
+    optimizer="scipy",
 ):
     """Fit nominal or nested 2PL/3PL/3PLu/4PL with N(0,1) marginal likelihood.
 
@@ -183,7 +186,13 @@ def nominal_irt(
     For nominal fits the item-0/category-1 slope is positive to fix latent sign;
     nested correct-answer slopes are all positive. No item priors are applied.
     Responses use declared zero-based categories and NaN for missing values.
+    optimizer="scipy" retains SLSQP. optimizer="jax" requires jit=True and
+    uses device-side spectral projected gradient with the same constraints.
+    For JAX, tolerance bounds the unit-step projected-gradient infinity norm;
+    trace contains accepted iterates and may be nonmonotone. See PERFORMANCE.md.
     """
+    if optimizer not in ("scipy", "jax") or (optimizer == "jax" and not jit):
+        raise ValueError("optimizer must be scipy or jax; jax requires jit=True")
     if not jax.config.x64_enabled:
         raise ValueError("Enable JAX x64 before fitting")
     if model not in ("nominal", "2pl", "3pl", "3plu", "4pl"):
@@ -304,16 +313,30 @@ def nominal_irt(
         return float(value), np.asarray(grad)
 
     trace = [-objective(raw)[0] * len(y)]
-    opt = minimize(
-        objective,
-        raw,
-        jac=True,
-        method="SLSQP",
-        bounds=list(zip(lower, upper)),
-        constraints=constraints,
-        callback=lambda p: trace.append(-objective(p)[0] * len(y)),
-        options={"maxiter": max_iter, "ftol": tolerance},
-    )
+    if optimizer == "jax":
+        opt = device_minimize(
+            _loss,
+            raw,
+            args,
+            lower=lower,
+            upper=upper,
+            constraints=constraints,
+            config=(("model", model),),
+            max_iter=max_iter,
+            tolerance=tolerance,
+        )
+        trace = -opt.trace * len(y)
+    else:
+        opt = minimize(
+            objective,
+            raw,
+            jac=True,
+            method="SLSQP",
+            bounds=list(zip(lower, upper)),
+            constraints=constraints,
+            callback=lambda p: trace.append(-objective(p)[0] * len(y)),
+            options={"maxiter": max_iter, "ftol": tolerance},
+        )
     ll, post = (_score if jit else _posterior)(
         jnp.asarray(opt.x),
         args[0],

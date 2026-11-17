@@ -40,6 +40,9 @@ result = bin_irt(
 print(result.means["x"], result.converged)
 ```
 
+For execution modes, optional device-side optimizers, and stopping rules, see
+[Performance](PERFORMANCE.md).
+
 ## Models
 
 | Function | Formulas | Input | Main parameters |

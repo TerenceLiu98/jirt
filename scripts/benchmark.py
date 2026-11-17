@@ -29,26 +29,36 @@ def worker(model):
     jax.config.update("jax_enable_x64", True)
     import jirt
 
-    original_jit = jax.jit
-    stats = {"compile_seconds": 0.0, "update_seconds": 0.0, "updates": 0}
+    import platform
+    import jirt._iteration as iteration
 
-    def measured_jit(fn, *args, **kwargs):
-        wrapped = original_jit(fn, *args, **kwargs)
-        compiled = None
+    original = iteration._cached_iterations
+    stats = {
+        "compile_seconds": 0.0,
+        "kernel_seconds": [],
+        "total_seconds": [],
+        "backend": jax.default_backend(),
+        "devices": [str(d) for d in jax.devices()],
+        "platform": platform.platform(),
+        "dtype": "float64",
+        "max_iter": 30,
+        "tolerance": 0,
+        "convergence": "correlation",
+    }
+    executable = None
 
-        def invoke(*values):
-            nonlocal compiled
-            if compiled is None:
-                start = time.perf_counter()
-                compiled = wrapped.lower(*values).compile()
-                stats["compile_seconds"] += time.perf_counter() - start
+    def measured(step, state, data, tolerance, **options):
+        nonlocal executable
+        if executable is None:
             start = time.perf_counter()
-            result = jax.block_until_ready(compiled(*values))
-            stats["update_seconds"] += time.perf_counter() - start
-            stats["updates"] += 1
-            return result
-
-        return invoke
+            executable = original.lower(
+                step, state, data, tolerance, **options
+            ).compile()
+            stats["compile_seconds"] = time.perf_counter() - start
+        start = time.perf_counter()
+        result = jax.block_until_ready(executable(state, data, tolerance))
+        stats["kernel_seconds"].append(time.perf_counter() - start)
+        return result
 
     functions = dict(
         binary_em=jirt.bin_irt,
@@ -60,17 +70,19 @@ def worker(model):
         poisson=jirt.pois_irt,
     )
     case = json.loads((ROOT / "tests" / "fixtures" / f"{model}.json").read_text())
-    jax.jit = measured_jit
+    iteration._cached_iterations = measured
     try:
-        start = time.perf_counter()
-        fit = functions[model](
-            **case["kwargs"], control=jirt.Control(max_iter=30, tolerance=0)
-        )
-        jax.block_until_ready(fit.means)
-        stats["total_seconds"] = time.perf_counter() - start
+        for _ in range(4):
+            start = time.perf_counter()
+            fit = functions[model](
+                **case["kwargs"], control=jirt.Control(max_iter=30, tolerance=0)
+            )
+            jax.block_until_ready(fit.means)
+            stats["total_seconds"].append(time.perf_counter() - start)
+        stats["iterations"] = fit.iterations
+        stats["converged"] = fit.converged
     finally:
-        jax.jit = original_jit
-    stats["mean_update_seconds"] = stats["update_seconds"] / stats["updates"]
+        iteration._cached_iterations = original
     print(json.dumps(stats))
 
 

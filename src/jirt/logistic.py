@@ -13,6 +13,7 @@ from numpy.polynomial.hermite import hermgauss
 from scipy.optimize import Bounds, LinearConstraint, minimize
 
 from .types import LogisticStarts
+from ._optimize import device_minimize
 
 
 @dataclass
@@ -113,6 +114,7 @@ def logistic_irt(
     max_iter=1000,
     tolerance=1e-8,
     jit=True,
+    optimizer="scipy",
 ):
     """Fit Rasch, shared-slope 1PL, 2PL, 3PL or full 4PL to 0/1 responses.
 
@@ -121,7 +123,10 @@ def logistic_irt(
     to one; ``1pl`` estimates one common slope. Starts, when supplied, contain
     per-item b and a (scalar a for 1PL), plus c for 3PL/4PL and u for 4PL.
 
-    SLSQP maximizes quadrature marginal likelihood using JAX derivatives.
+    optimizer="scipy" uses SLSQP; "jax" uses device-side spectral projected
+    gradient and requires jit=True. Both optimize the same marginal likelihood.
+    The JAX tolerance bounds the infinity norm of the unit-step projected
+    gradient; its trace contains accepted iterates, which need not be monotone.
     Numerical constraints are a >= 1e-6; fitted c >= 1e-6; fitted u <= 1-1e-6;
     and u-c >= 1e-6. Fixed asymptotes remain exactly 0/1.
     ``tolerance`` controls SLSQP's stopping accuracy on mean negative log
@@ -145,6 +150,8 @@ def logistic_irt(
         raise ValueError("tolerance must be finite and positive")
     if not isinstance(jit, bool):
         raise ValueError("jit must be boolean")
+    if optimizer not in ("scipy", "jax") or (optimizer == "jax" and not jit):
+        raise ValueError("optimizer must be scipy or jax; jax requires jit=True")
     y = np.asarray(responses, dtype=float)
     if y.ndim != 2 or min(y.shape) < 2 or not (np.isin(y, [0, 1]) | np.isnan(y)).all():
         raise ValueError(
@@ -221,16 +228,30 @@ def logistic_irt(
     def callback(params):
         history.append(-objective(params)[0] * y.shape[0])
 
-    optimum = minimize(
-        objective,
-        initial,
-        method="SLSQP",
-        jac=True,
-        bounds=Bounds(lower, upper),
-        constraints=constraints,
-        callback=callback,
-        options={"maxiter": max_iter, "ftol": tolerance},
-    )
+    if optimizer == "jax":
+        optimum = device_minimize(
+            _loss,
+            initial,
+            arguments,
+            lower=lower,
+            upper=upper,
+            constraints=constraints,
+            config=(("model", model),),
+            max_iter=max_iter,
+            tolerance=tolerance,
+        )
+        history = -optimum.trace * y.shape[0]
+    else:
+        optimum = minimize(
+            objective,
+            initial,
+            method="SLSQP",
+            jac=True,
+            bounds=Bounds(lower, upper),
+            constraints=constraints,
+            callback=callback,
+            options={"maxiter": max_iter, "ftol": tolerance},
+        )
     params = jnp.asarray(optimum.x)
     log_likelihood, posterior = (_score if jit else _posterior)(
         params, *arguments, model=model

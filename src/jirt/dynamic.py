@@ -4,8 +4,82 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.special import log_ndtr, ndtr
 import numpy as np
+from ._iteration import run_explicit
 from .binary import Control, FitResult
 from .types import BinaryStarts, DynamicPriors
+
+
+def _dynamic_select(state, data):
+    return state[0], state[1], state[2].reshape(-1)[data[-1]]
+
+
+def _dynamic_step(state, data):
+    mask, ip, yy, precision, pm, mu0, v0, omega, first, last, _ = data
+    n, nt = state[2].shape
+    a, b, x, vx, vc, ebb, eba = state
+    eta = a[None, :] + x[:, ip] * b[None, :]
+    sign = jnp.where(yy == -1, -1.0, 1.0)
+    z = eta * sign
+    latent = jnp.where(
+        mask[:, ip],
+        eta
+        + jnp.where(
+            jnp.abs(yy) == 1,
+            sign * jnp.exp(-0.5 * z * z - 0.5 * jnp.log(2 * jnp.pi) - log_ndtr(z)),
+            0.0,
+        ),
+        0.0,
+    )
+    precision_t = jnp.zeros(nt).at[ip].add(ebb)
+    cross = jnp.zeros(nt).at[ip].add(eba)
+    info = jnp.zeros((n, nt)).at[:, ip].add(latent * b[None, :]) - cross[None, :]
+
+    def forward(carry, t):
+        mean, var = carry
+        mean = jnp.where(t == first, mu0, mean)
+        pred = jnp.where(t == first, v0, var) + omega
+        var = pred / (1 + pred * precision_t[t])
+        mean = var * (mean / pred + info[:, t])
+        return (mean, var), (mean, var, pred)
+
+    _, (fm, fv, pred) = jax.lax.scan(forward, (mu0, v0), jnp.arange(nt))
+
+    def backward(carry, t):
+        next_mean, next_var = carry
+        gain = fv[t] / (fv[t] + omega)
+        mean = jnp.where(t == last, fm[t], fm[t] + gain * (next_mean - fm[t]))
+        var = jnp.where(
+            t == last, fv[t], fv[t] + gain * gain * (next_var - fv[t] - omega)
+        )
+        mean = jnp.where(mask[:, t], mean, 0.0)
+        var = jnp.where(mask[:, t], var, 0.0)
+        return (mean, var), (mean, var)
+
+    _, (sx, sv) = jax.lax.scan(
+        backward, (jnp.zeros(n), jnp.zeros(n)), jnp.arange(nt - 1, -1, -1)
+    )
+    x = sx[::-1].T
+    vx = sv[::-1].T
+    sx = jnp.sum(x, axis=0)
+    moment = (
+        jnp.zeros((nt, 2, 2))
+        .at[:, 0, 0]
+        .set(jnp.sum(mask, axis=0))
+        .at[:, 0, 1]
+        .set(sx)
+        .at[:, 1, 0]
+        .set(sx)
+        .at[:, 1, 1]
+        .set(jnp.sum(x * x + vx, axis=0))
+    )
+    vc = jnp.linalg.inv(precision[None, :, :] + moment)
+    rhs = (
+        jnp.stack([jnp.sum(latent, axis=0), jnp.sum(latent * x[:, ip], axis=0)], axis=1)
+        + pm
+    )
+    ab = jnp.einsum("jab,jb->ja", vc[ip], rhs)
+    a, b = ab[:, 0], ab[:, 1]
+    return a, b, x, vx, vc, b * b + vc[ip, 1, 1], a * b + vc[ip, 0, 1]
 
 
 def dyn_irt(
@@ -100,75 +174,24 @@ def dyn_irt(
     v0 = jnp.asarray(p["x_variance0"])
     omega = jnp.asarray(p["omega2"])
 
-    def step(state):
-        a, b, x, vx, vc, ebb, eba = state
-        eta = a[None, :] + x[:, ip] * b[None, :]
-        sign = jnp.where(yy == -1, -1.0, 1.0)
-        z = eta * sign
-        latent = jnp.where(
-            mask[:, ip],
-            eta
-            + jnp.where(
-                jnp.abs(yy) == 1,
-                sign * jnp.exp(-0.5 * z * z - 0.5 * jnp.log(2 * jnp.pi) - log_ndtr(z)),
-                0.0,
-            ),
-            0.0,
-        )
-        precision_t = jnp.zeros(nt).at[ip].add(ebb)
-        cross = jnp.zeros(nt).at[ip].add(eba)
-        info = jnp.zeros((n, nt)).at[:, ip].add(latent * b[None, :]) - cross[None, :]
+    active_indices = jnp.asarray(np.flatnonzero(active))
+    data = (
+        mask,
+        ip,
+        yy,
+        precision,
+        pm,
+        mu0,
+        v0,
+        omega,
+        jnp.asarray(first),
+        jnp.asarray(last),
+        active_indices,
+    )
 
-        def forward(carry, t):
-            mean, var = carry
-            mean = jnp.where(t == first, mu0, mean)
-            pred = jnp.where(t == first, v0, var) + omega
-            var = pred / (1 + pred * precision_t[t])
-            mean = var * (mean / pred + info[:, t])
-            return (mean, var), (mean, var, pred)
+    def update(state):
+        return _dynamic_step(state, data)
 
-        _, (fm, fv, pred) = jax.lax.scan(forward, (mu0, v0), jnp.arange(nt))
-
-        def backward(carry, t):
-            next_mean, next_var = carry
-            gain = fv[t] / (fv[t] + omega)
-            mean = jnp.where(t == last, fm[t], fm[t] + gain * (next_mean - fm[t]))
-            var = jnp.where(
-                t == last, fv[t], fv[t] + gain * gain * (next_var - fv[t] - omega)
-            )
-            mean = jnp.where(mask[:, t], mean, 0.0)
-            var = jnp.where(mask[:, t], var, 0.0)
-            return (mean, var), (mean, var)
-
-        _, (sx, sv) = jax.lax.scan(
-            backward, (jnp.zeros(n), jnp.zeros(n)), jnp.arange(nt - 1, -1, -1)
-        )
-        x = sx[::-1].T
-        vx = sv[::-1].T
-        sx = jnp.sum(x, axis=0)
-        moment = (
-            jnp.zeros((nt, 2, 2))
-            .at[:, 0, 0]
-            .set(jnp.sum(mask, axis=0))
-            .at[:, 0, 1]
-            .set(sx)
-            .at[:, 1, 0]
-            .set(sx)
-            .at[:, 1, 1]
-            .set(jnp.sum(x * x + vx, axis=0))
-        )
-        vc = jnp.linalg.inv(precision[None, :, :] + moment)
-        rhs = (
-            jnp.stack(
-                [jnp.sum(latent, axis=0), jnp.sum(latent * x[:, ip], axis=0)], axis=1
-            )
-            + pm
-        )
-        ab = jnp.einsum("jab,jb->ja", vc[ip], rhs)
-        a, b = ab[:, 0], ab[:, 1]
-        return a, b, x, vx, vc, b * b + vc[ip, 1, 1], a * b + vc[ip, 0, 1]
-
-    update = jax.jit(step) if c.jit else step
     state = (
         jnp.asarray(a),
         jnp.asarray(b),
@@ -178,27 +201,42 @@ def dyn_irt(
         jnp.asarray(b * b),
         jnp.asarray(a * b),
     )
-    history = []
-    converged = False
-    for iteration in range(1, c.max_iter + 1):
-        old = state
-        state = update(state)
-        if not all(np.isfinite(np.asarray(v)).all() for v in state):
-            raise FloatingPointError(f"Nonfinite update at iteration {iteration}")
-        errors = []
-        for k, (u, v) in enumerate(zip(old[:3], state[:3])):
-            u, v = np.asarray(u), np.asarray(v)
-            if k == 2:
-                u, v = u[active], v[active]
-            errors.append(
-                float(max(0, 1 - np.corrcoef(u, v)[0, 1]))
-                if c.convergence == "correlation" and np.std(u) > 0 and np.std(v) > 0
-                else float(np.max(np.abs(u - v)))
-            )
-        history.append(errors)
-        if iteration > 2 and max(errors) < c.tolerance:
-            converged = True
-            break
+    if c.jit:
+        state, converged, iteration, history = run_explicit(
+            _dynamic_step,
+            state,
+            data,
+            count=3,
+            select=_dynamic_select,
+            max_iter=c.max_iter,
+            tolerance=c.tolerance,
+            correlation=c.convergence == "correlation",
+            min_iter=3,
+        )
+    else:
+        history = []
+        converged = False
+        for iteration in range(1, c.max_iter + 1):
+            old = state
+            state = update(state)
+            if not all(np.isfinite(np.asarray(v)).all() for v in state):
+                raise FloatingPointError(f"Nonfinite update at iteration {iteration}")
+            errors = []
+            for k, (u, v) in enumerate(zip(old[:3], state[:3])):
+                u, v = np.asarray(u), np.asarray(v)
+                if k == 2:
+                    u, v = u[active], v[active]
+                errors.append(
+                    float(max(0, 1 - np.corrcoef(u, v)[0, 1]))
+                    if c.convergence == "correlation"
+                    and np.std(u) > 0
+                    and np.std(v) > 0
+                    else float(np.max(np.abs(u - v)))
+                )
+            history.append(errors)
+            if iteration > 2 and max(errors) < c.tolerance:
+                converged = True
+                break
     a, b, x, vx, vc, _, _ = state
     probabilities = jnp.where(
         mask[:, ip], ndtr(a[None, :] + x[:, ip] * b[None, :]), jnp.nan

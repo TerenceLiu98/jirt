@@ -51,6 +51,76 @@ def _posterior(patterns, ideal, slip, guess, weights):
     return jax.scipy.special.logsumexp(joint, axis=1), jax.nn.softmax(joint, axis=1)
 
 
+def _m_step(post, frequency, ideal, yes, observed, slip, guess):
+    weighted = post * frequency[:, None]
+    masters = weighted @ ideal.astype(float)
+    nonmasters = weighted @ (~ideal).astype(float)
+    mden = jnp.sum(masters * observed, axis=0)
+    nden = jnp.sum(nonmasters * observed, axis=0)
+    mnum = jnp.sum(masters * yes, axis=0)
+    nnum = jnp.sum(nonmasters * yes, axis=0)
+    high = jnp.where(mden > 0, mnum / jnp.maximum(mden, 1e-300), 1 - slip)
+    low = jnp.where(nden > 0, nnum / jnp.maximum(nden, 1e-300), guess)
+    # Two-bin isotonic Bernoulli MLE when the unconstrained rates cross.
+    pooled = (mnum + nnum) / jnp.maximum(mden + nden, 1e-300)
+    crossing = low > high
+    low = jnp.clip(jnp.where(crossing, pooled, low), 1e-6, 1 - 1e-6)
+    high = jnp.clip(jnp.where(crossing, pooled, high), 1e-6, 1 - 1e-6)
+    weights = jnp.maximum(weighted.sum(axis=0), 1e-300)
+    weights /= weights.sum()
+    return 1 - high, low, weights
+
+
+def _fit_loop(patterns, frequency, ideal, slip, guess, weights, tolerance, *, max_iter):
+    yes = (patterns == 1).astype(float)
+    observed = (patterns >= 0).astype(float)
+    ll, post = _posterior(patterns, ideal, slip, guess, weights)
+    value = ll @ frequency
+    trace = jnp.full((max_iter + 1,), jnp.nan).at[0].set(value)
+    initial = (
+        jnp.array(0),
+        slip,
+        guess,
+        weights,
+        post,
+        value,
+        jnp.array(False),
+        jnp.isfinite(value),
+        trace,
+    )
+
+    def condition(state):
+        iteration, _, _, _, _, _, converged, finite, _ = state
+        return (iteration < max_iter) & ~converged & finite
+
+    def body(state):
+        iteration, slip, guess, weights, post, previous, _, _, trace = state
+        slip, guess, weights = _m_step(
+            post, frequency, ideal, yes, observed, slip, guess
+        )
+        ll, post = _posterior(patterns, ideal, slip, guess, weights)
+        value = ll @ frequency
+        finite = jnp.isfinite(value) & jnp.all(jnp.isfinite(post))
+        converged = finite & (jnp.abs(value - previous) / frequency.sum() < tolerance)
+        iteration += 1
+        return (
+            iteration,
+            slip,
+            guess,
+            weights,
+            post,
+            value,
+            converged,
+            finite,
+            trace.at[iteration].set(value),
+        )
+
+    return jax.lax.while_loop(condition, body, initial)
+
+
+_fit_compiled = jax.jit(_fit_loop, static_argnames=("max_iter",))
+
+
 @dataclass
 class DiagnosticResult:
     model: str
@@ -177,45 +247,41 @@ def diagnostic_irt(
     )
     patterns = jnp.asarray(patterns)
     frequency = jnp.asarray(frequency)
-    yes = (patterns == 1).astype(float)
-    observed = (patterns >= 0).astype(float)
     slip, guess, weights = map(jnp.asarray, (slip, guess, weights))
-    score = jax.jit(_posterior) if jit else _posterior
-
-    def step(slip, guess, weights):
-        _, post = _posterior(patterns, ideal, slip, guess, weights)
-        weighted = post * frequency[:, None]
-        masters = weighted @ ideal.astype(float)
-        nonmasters = weighted @ (~ideal).astype(float)
-        mden = jnp.sum(masters * observed, axis=0)
-        nden = jnp.sum(nonmasters * observed, axis=0)
-        mnum = jnp.sum(masters * yes, axis=0)
-        nnum = jnp.sum(nonmasters * yes, axis=0)
-        high = jnp.where(mden > 0, mnum / jnp.maximum(mden, 1e-300), 1 - slip)
-        low = jnp.where(nden > 0, nnum / jnp.maximum(nden, 1e-300), guess)
-        # Two-bin isotonic Bernoulli MLE when the unconstrained rates cross.
-        pooled = (mnum + nnum) / jnp.maximum(mden + nden, 1e-300)
-        crossing = low > high
-        low = jnp.clip(jnp.where(crossing, pooled, low), 1e-6, 1 - 1e-6)
-        high = jnp.clip(jnp.where(crossing, pooled, high), 1e-6, 1 - 1e-6)
-        weights = jnp.maximum(weighted.sum(axis=0), 1e-300)
-        weights /= weights.sum()
-        return 1 - high, low, weights
-
-    update = jax.jit(step) if jit else step
-    ll, post = score(patterns, ideal, slip, guess, weights)
-    trace = [float(ll @ frequency)]
-    converged = False
-    for iteration in range(1, max_iter + 1):
-        slip, guess, weights = update(slip, guess, weights)
-        ll, post = score(patterns, ideal, slip, guess, weights)
-        value = float(ll @ frequency)
-        if not np.isfinite(value):
+    if jit:
+        state = _fit_compiled(
+            patterns,
+            frequency,
+            ideal,
+            slip,
+            guess,
+            weights,
+            jnp.asarray(tolerance),
+            max_iter=max_iter,
+        )
+        iteration, slip, guess, weights, post, value, converged, finite, trace = state
+        iteration, converged = int(iteration), bool(converged)
+        if not bool(finite):
             raise FloatingPointError("Nonfinite diagnostic likelihood")
-        trace.append(value)
-        if abs(trace[-1] - trace[-2]) / len(y) < tolerance:
-            converged = True
-            break
+        trace = np.asarray(trace)[: iteration + 1]
+    else:
+        yes = (patterns == 1).astype(float)
+        observed = (patterns >= 0).astype(float)
+        ll, post = _posterior(patterns, ideal, slip, guess, weights)
+        trace = [float(ll @ frequency)]
+        converged = False
+        for iteration in range(1, max_iter + 1):
+            slip, guess, weights = _m_step(
+                post, frequency, ideal, yes, observed, slip, guess
+            )
+            ll, post = _posterior(patterns, ideal, slip, guess, weights)
+            value = float(ll @ frequency)
+            if not np.isfinite(value):
+                raise FloatingPointError("Nonfinite diagnostic likelihood")
+            trace.append(value)
+            if abs(trace[-1] - trace[-2]) / len(y) < tolerance:
+                converged = True
+                break
     return DiagnosticResult(
         model,
         q.astype(int),

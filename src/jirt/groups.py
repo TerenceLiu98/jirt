@@ -1,5 +1,7 @@
 """Observed-group and latent-class logistic/graded response mechanisms."""
 
+from ._optimize import device_minimize
+
 import jax
 import jax.numpy as jnp
 
@@ -136,6 +138,70 @@ class GroupIRTResult:
         )
 
 
+def _group_unpack(raw, data, layout):
+    ia, ib, valid_jax, patterns, freq, nodes, lw, counts_jax, labels = data
+    (
+        model,
+        free_distribution,
+        mixture,
+        zero_inflated,
+        distribution_offset,
+        weight_offset,
+    ) = layout
+    C, J = ia.shape
+    slopes = jnp.ones((C, J)) if model == "rasch" else raw[ia]
+    steps = jnp.where(valid_jax, raw[ib], 0.0)
+    mean = (
+        jnp.r_[0.0, raw[distribution_offset : distribution_offset + C - 1]]
+        if free_distribution
+        else jnp.zeros(C)
+    )
+    sd = (
+        jnp.r_[
+            1.0,
+            raw[distribution_offset + C - 1 : distribution_offset + 2 * (C - 1)],
+        ]
+        if free_distribution
+        else jnp.ones(C)
+    )
+    weight = jax.nn.softmax(jnp.r_[0.0, raw[weight_offset:]]) if mixture else None
+    return slopes, steps, mean, sd, weight
+
+
+def _group_posterior(raw, data, layout):
+    ia, ib, valid_jax, patterns, freq, nodes, lw, counts_jax, labels = data
+    (
+        model,
+        free_distribution,
+        mixture,
+        zero_inflated,
+        distribution_offset,
+        weight_offset,
+    ) = layout
+    C, J = ia.shape
+    slopes, steps, mean, sd, weight = _group_unpack(raw, data, layout)
+    cll, post, theta = _component_posterior(
+        patterns, nodes, lw, slopes, steps, mean, sd, counts_jax, model
+    )
+    if mixture:
+        ll, members = _mix_posterior(cll, patterns, weight, zero_inflated)
+    else:
+        ll = cll[jnp.arange(len(labels)), labels]
+        members = jax.nn.one_hot(labels, C)
+    return ll, members, post, theta
+
+
+def _group_loss(raw, data, layout):
+    freq = data[4]
+    return -(_group_posterior(raw, data, layout)[0] @ freq) / freq.sum()
+
+
+_group_value_grad = jax.jit(
+    jax.value_and_grad(_group_loss), static_argnames=("layout",)
+)
+_group_score = jax.jit(_group_posterior, static_argnames=("layout",))
+
+
 def _fit(
     responses,
     *,
@@ -152,7 +218,10 @@ def _fit(
     max_iter,
     tolerance,
     jit,
+    optimizer,
 ):
+    if optimizer not in ("scipy", "jax") or (optimizer == "jax" and not jit):
+        raise ValueError("optimizer must be scipy or jax; jax requires jit=True")
     if not jax.config.x64_enabled:
         raise ValueError("Enable JAX x64 before fitting")
     if model not in ("rasch", "2pl", "grm"):
@@ -337,67 +406,62 @@ def _fit(
     valid_jax = jnp.asarray(valid)
     counts_jax = jnp.asarray(counts)
 
-    def unpack(raw):
-        slopes = jnp.ones((C, J)) if model == "rasch" else raw[ia]
-        steps = jnp.where(valid_jax, raw[ib], 0.0)
-        mean = (
-            jnp.r_[0.0, raw[distribution_offset : distribution_offset + C - 1]]
-            if free_distribution
-            else jnp.zeros(C)
-        )
-        sd = (
-            jnp.r_[
-                1.0,
-                raw[distribution_offset + C - 1 : distribution_offset + 2 * (C - 1)],
-            ]
-            if free_distribution
-            else jnp.ones(C)
-        )
-        weight = (
-            jax.nn.softmax(jnp.r_[0.0, raw[weight_offset:]]) if groups is None else None
-        )
-        return slopes, steps, mean, sd, weight
-
-    def posterior(raw):
-        slopes, steps, mean, sd, weight = unpack(raw)
-        cll, post, theta = _component_posterior(
-            patterns, nodes, lw, slopes, steps, mean, sd, counts_jax, model
-        )
-        if groups is None:
-            ll, members = _mix_posterior(cll, patterns, weight, zero_inflated)
-        else:
-            ll = cll[jnp.arange(len(labels)), labels]
-            members = jax.nn.one_hot(labels, C)
-        return ll, members, post, theta
-
-    def loss(raw):
-        return -(posterior(raw)[0] @ freq) / freq.sum()
-
-    evaluate = jax.value_and_grad(loss)
-    if jit:
-        evaluate = jax.jit(evaluate)
+    data = (
+        ia,
+        ib,
+        valid_jax,
+        patterns,
+        freq,
+        nodes,
+        lw,
+        counts_jax,
+        jnp.asarray(labels) if labels is not None else jnp.zeros(0, dtype=int),
+    )
+    layout = (
+        model,
+        free_distribution,
+        groups is None,
+        zero_inflated,
+        distribution_offset,
+        weight_offset,
+    )
+    evaluate = _group_value_grad if jit else jax.value_and_grad(_group_loss)
 
     def objective(raw):
-        value, grad = evaluate(jnp.asarray(raw))
+        value, grad = evaluate(jnp.asarray(raw), data, layout)
         if not np.isfinite(value) or not np.isfinite(grad).all():
             raise FloatingPointError("Nonfinite group/mixture objective")
         return float(value), np.asarray(grad)
 
     trace = [-objective(np.asarray(raw))[0] * len(y)]
-    opt = minimize(
-        objective,
-        np.asarray(raw),
-        jac=True,
-        method="SLSQP",
-        bounds=list(zip(lower, upper)),
-        constraints=constraints,
-        callback=lambda raw: trace.append(-objective(raw)[0] * len(y)),
-        options={"maxiter": max_iter, "ftol": tolerance},
+    if optimizer == "jax":
+        opt = device_minimize(
+            _group_loss,
+            np.asarray(raw),
+            (data,),
+            lower=lower,
+            upper=upper,
+            constraints=constraints,
+            config=(("layout", layout),),
+            max_iter=max_iter,
+            tolerance=tolerance,
+        )
+        trace = -opt.trace * len(y)
+    else:
+        opt = minimize(
+            objective,
+            np.asarray(raw),
+            jac=True,
+            method="SLSQP",
+            bounds=list(zip(lower, upper)),
+            constraints=constraints,
+            callback=lambda raw: trace.append(-objective(raw)[0] * len(y)),
+            options={"maxiter": max_iter, "ftol": tolerance},
+        )
+    ll, members, post, theta = (_group_score if jit else _group_posterior)(
+        jnp.asarray(opt.x), data, layout
     )
-    ll, members, post, theta = (jax.jit(posterior) if jit else posterior)(
-        jnp.asarray(opt.x)
-    )
-    slopes, steps, mean, sd, weights = unpack(jnp.asarray(opt.x))
+    slopes, steps, mean, sd, weights = _group_unpack(jnp.asarray(opt.x), data, layout)
     cx = jnp.sum(post * theta[None, :, :], axis=-1)
     cv = jnp.sum(post * (theta[None, :, :] - cx[:, :, None]) ** 2, axis=-1)
     regular = members[:, :C]
@@ -440,6 +504,7 @@ def group_irt(
     max_iter=2000,
     tolerance=1e-10,
     jit=True,
+    optimizer="scipy",
 ):
     """Fit observed groups; integer labels 0..G-1 are known, not inferred.
 
@@ -447,6 +512,10 @@ def group_irt(
     defaults free all items. Free distributions estimate mu/sigma outside group
     zero, requiring at least two fully shared anchor items. starts supplies
     steps (G,J,max(K)-1), optionally a (G,J), mu/sigma (G,).
+    optimizer="scipy" retains SLSQP. optimizer="jax" requires jit=True and
+    uses device-side spectral projected gradient with the same constraints.
+    For JAX, tolerance bounds the unit-step projected-gradient infinity norm;
+    trace contains accepted iterates and may be nonmonotone. See PERFORMANCE.md.
     """
     labels = np.asarray(groups)
     if labels.ndim != 1 or labels.dtype.kind not in "iu" or not len(labels):
@@ -466,6 +535,7 @@ def group_irt(
         max_iter=max_iter,
         tolerance=tolerance,
         jit=jit,
+        optimizer=optimizer,
     )
 
 
@@ -484,6 +554,7 @@ def mixture_irt(
     max_iter=2000,
     tolerance=1e-10,
     jit=True,
+    optimizer="scipy",
 ):
     """Fit latent regular classes plus an optional structural all-lowest class.
 
@@ -493,6 +564,10 @@ def mixture_irt(
     arbitrary. x and its variance condition on membership in regular classes;
     the structural class has no ability. Its posterior is the last column of
     memberships. Missing observations impose no restriction on structural membership.
+    optimizer="scipy" retains SLSQP. optimizer="jax" requires jit=True and
+    uses device-side spectral projected gradient with the same constraints.
+    For JAX, tolerance bounds the unit-step projected-gradient infinity norm;
+    trace contains accepted iterates and may be nonmonotone. See PERFORMANCE.md.
     """
     candidates = starts if isinstance(starts, (list, tuple)) else [starts]
     if not candidates:
@@ -513,6 +588,7 @@ def mixture_irt(
             max_iter=max_iter,
             tolerance=tolerance,
             jit=jit,
+            optimizer=optimizer,
         )
         for s in candidates
     ]

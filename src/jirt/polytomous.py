@@ -1,5 +1,7 @@
 """Logistic ordered-response models with explicitly declared categories."""
 
+from ._optimize import device_minimize
+
 import jax
 import jax.numpy as jnp
 
@@ -134,6 +136,7 @@ def polytomous_irt(
     max_iter=1000,
     tolerance=1e-10,
     jit=True,
+    optimizer="scipy",
 ):
     """Fit ordered logistic models with fixed N(0,1) ability and no item priors.
 
@@ -143,7 +146,13 @@ def polytomous_irt(
     GRM/GPCM/sequential estimate positive slopes; Tutz fixes slopes to one.
     Sequential/Tutz use successive stage decisions. Only GRM requires increasing steps.
     starts accepts padded steps (J,max(K)-1) and free slopes a (J,).
+    optimizer="scipy" retains SLSQP. optimizer="jax" requires jit=True and
+    uses device-side spectral projected gradient with the same constraints.
+    For JAX, tolerance bounds the unit-step projected-gradient infinity norm;
+    trace contains accepted iterates and may be nonmonotone. See PERFORMANCE.md.
     """
+    if optimizer not in ("scipy", "jax") or (optimizer == "jax" and not jit):
+        raise ValueError("optimizer must be scipy or jax; jax requires jit=True")
     if not jax.config.x64_enabled:
         raise ValueError("Enable JAX x64 before fitting")
     if model not in ("grm", "pcm", "gpcm", "rsm", "sequential", "tutz"):
@@ -248,16 +257,30 @@ def polytomous_irt(
         return float(value), np.asarray(grad)
 
     trace = [-objective(pars)[0] * len(y)]
-    opt = minimize(
-        objective,
-        pars,
-        jac=True,
-        method="SLSQP",
-        bounds=list(zip(lower, np.full(len(lower), np.inf))),
-        constraints=constraints,
-        callback=lambda raw: trace.append(-objective(raw)[0] * len(y)),
-        options={"maxiter": max_iter, "ftol": tolerance},
-    )
+    if optimizer == "jax":
+        opt = device_minimize(
+            _loss,
+            pars,
+            args,
+            lower=lower,
+            upper=np.full(len(lower), np.inf),
+            constraints=constraints,
+            config=(("model", model),),
+            max_iter=max_iter,
+            tolerance=tolerance,
+        )
+        trace = -opt.trace * len(y)
+    else:
+        opt = minimize(
+            objective,
+            pars,
+            jac=True,
+            method="SLSQP",
+            bounds=list(zip(lower, np.full(len(lower), np.inf))),
+            constraints=constraints,
+            callback=lambda raw: trace.append(-objective(raw)[0] * len(y)),
+            options={"maxiter": max_iter, "ftol": tolerance},
+        )
     ll, post = (_score if jit else _posterior)(
         jnp.asarray(opt.x), args[0], args[2], args[3], args[4], args[5], model=model
     )

@@ -5,6 +5,7 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.special import log_ndtr, ndtr
 import numpy as np
+from ._iteration import run_explicit
 from .types import BinaryStarts, BinaryPriors
 
 
@@ -42,6 +43,44 @@ class FitResult:
     iterations: int
     trace: np.ndarray
     probabilities: jax.Array | None
+
+
+def _binary_expectation(state, data):
+    yy = data[0]
+    a, b, x, vx, vb = state
+    eta = a[None, :] + x[:, None] * b[None, :]
+    sign = jnp.where(yy == -1, -1.0, 1.0)
+    z = sign * eta
+    ratio = jnp.exp(-0.5 * z * z - 0.5 * jnp.log(2 * jnp.pi) - log_ndtr(z))
+    latent = eta + jnp.where(jnp.abs(yy) == 1, sign * ratio, 0.0)
+    return latent
+
+
+def _binary_maximize(state, latent, data):
+    yy, precision, pm, xp, xm, em = data
+    n, m = yy.shape
+    a, b, x, vx, vb = state
+    design = jnp.stack([jnp.ones(n), x], axis=1)
+    moment = (design.T @ design).at[1, 1].add(n * vx)
+    vb = jnp.linalg.inv(precision + moment)
+    weights = jax.lax.cond(
+        em, lambda: jnp.linalg.inv(precision + design.T @ design), lambda: vb
+    )
+    ab = (latent.T @ design + pm) @ weights
+    a, b = ab[:, 0], ab[:, 1]
+    cross = b @ a + jnp.where(em, 0.0, m * vb[0, 1])
+    vx = 1 / (xp + b @ b + m * vb[1, 1])
+    scale = jnp.where(em, 1 / (xp + b @ b), vx)
+    x = scale * (xp * xm + latent @ b - cross)
+    return a, b, x, vx, vb
+
+
+def _binary_step(state, data):
+    return _binary_maximize(state, _binary_expectation(state, data), data)
+
+
+def _binary_finalize(new, old, data):
+    return _binary_maximize(new, _binary_expectation(old, data), data)
 
 
 def bin_irt(
@@ -134,57 +173,53 @@ def bin_irt(
     xp = 1 / p["x_variance"]
     yy = jnp.asarray(y)
 
-    def expectation(state):
-        a, b, x, vx, vb = state
-        eta = a[None, :] + x[:, None] * b[None, :]
-        sign = jnp.where(yy == -1, -1.0, 1.0)
-        z = sign * eta
-        ratio = jnp.exp(-0.5 * z * z - 0.5 * jnp.log(2 * jnp.pi) - log_ndtr(z))
-        latent = eta + jnp.where(jnp.abs(yy) == 1, sign * ratio, 0.0)
-        return latent
+    data = (
+        yy,
+        precision,
+        pm,
+        jnp.asarray(xp),
+        jnp.asarray(p["x_mu"]),
+        jnp.asarray(method == "em"),
+    )
 
-    def maximize(state, latent):
-        a, b, x, vx, vb = state
-        design = jnp.stack([jnp.ones(n), x], axis=1)
-        moment = (design.T @ design).at[1, 1].add(n * vx)
-        vb = jnp.linalg.inv(precision + moment)
-        weights = (
-            jnp.linalg.inv(precision + design.T @ design) if method == "em" else vb
-        )
-        ab = (latent.T @ design + pm) @ weights
-        a, b = ab[:, 0], ab[:, 1]
-        cross = b @ a + (m * vb[0, 1] if method == "variational" else 0.0)
-        vx = 1 / (xp + b @ b + m * vb[1, 1])
-        scale = 1 / (xp + b @ b) if method == "em" else vx
-        x = scale * (xp * p["x_mu"] + latent @ b - cross)
-        return a, b, x, vx, vb
+    def update(state):
+        return _binary_step(state, data)
 
-    def step(state):
-        return maximize(state, expectation(state))
-
-    update = jax.jit(step) if c.jit else step
     state = (*map(jnp.asarray, arrays), jnp.asarray(p["x_variance"]), jnp.asarray(cov))
-    history = []
-    converged = False
-    for iteration in range(1, c.max_iter + 1):
-        old = state
-        state = update(state)
-        if not all(np.isfinite(np.asarray(a)).all() for a in state):
-            raise FloatingPointError(f"Nonfinite update at iteration {iteration}")
-        errors = []
-        for before, after in zip(old[:3], state[:3]):
-            u, v = np.asarray(before), np.asarray(after)
-            if c.convergence == "absolute" or np.std(u) == 0 or np.std(v) == 0:
-                error = float(np.max(np.abs(v - u)))
-            else:
-                error = float(max(0.0, 1 - np.corrcoef(u, v)[0, 1]))
-            errors.append(error)
-        history.append(errors)
-        if iteration >= 2 and max(errors) < c.tolerance:
-            converged = True
-            # Reference finalization repeats maximization with the SAME latent expectations.
-            state = maximize(state, expectation(old))
-            break
+    if c.jit:
+        state, converged, iteration, history = run_explicit(
+            _binary_step,
+            state,
+            data,
+            count=3,
+            max_iter=c.max_iter,
+            tolerance=c.tolerance,
+            correlation=c.convergence == "correlation",
+            min_iter=2,
+            finalize=_binary_finalize,
+        )
+    else:
+        history = []
+        converged = False
+        for iteration in range(1, c.max_iter + 1):
+            old = state
+            state = update(state)
+            if not all(np.isfinite(np.asarray(a)).all() for a in state):
+                raise FloatingPointError(f"Nonfinite update at iteration {iteration}")
+            errors = []
+            for before, after in zip(old[:3], state[:3]):
+                u, v = np.asarray(before), np.asarray(after)
+                if c.convergence == "absolute" or np.std(u) == 0 or np.std(v) == 0:
+                    error = float(np.max(np.abs(v - u)))
+                else:
+                    error = float(max(0.0, 1 - np.corrcoef(u, v)[0, 1]))
+                errors.append(error)
+            history.append(errors)
+            if iteration >= 2 and max(errors) < c.tolerance:
+                converged = True
+                # Reference finalization repeats maximization with the SAME latent expectations.
+                state = _binary_finalize(state, old, data)
+                break
     if not all(np.isfinite(np.asarray(v)).all() for v in state):
         raise FloatingPointError("Nonfinite finalization")
     a, b, x, vx, vb = state

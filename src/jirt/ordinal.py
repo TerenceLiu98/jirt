@@ -4,6 +4,7 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.special import log_ndtr, ndtr, gammaln
 import numpy as np
+from ._iteration import run_explicit, finite_state
 from .binary import Control, FitResult
 from .types import OrdinalStarts, OrdinalPriors
 
@@ -38,6 +39,39 @@ def _moments(eta, dd, y):
         jnp.where(y == 3, 1 + hi * right - right**2, jnp.where(y == 2, varmid, 1.0)),
     )
     return eta + sd * shift, sd**2 * var
+
+
+def _ordinal_valid(state, data):
+    return finite_state(state) & jnp.all(state[3] > 0)
+
+
+def _ordinal_step(state, data):
+    yy, precision, pm, xm, xv = data
+    n = state[2].shape[0]
+    shape = 1 + n // 2
+    t, b, x, dd, vx, vc, rate = state
+    ez, _ = _moments(t[None, :] + x[:, None] * b[None, :], dd, yy)
+    ebb = b * b
+    vx = 1 / (1 / xv + ebb @ dd)
+    x = vx * (xm / xv + ez @ (b * dd) - jnp.sum(b * t * dd))
+    design = jnp.stack([jnp.ones(n), x], axis=1)
+    moment = (design.T @ design).at[1, 1].add(n * vx)
+    vc = jnp.linalg.inv(precision[None, :, :] + dd[:, None, None] * moment)
+    ab = jnp.einsum("jab,jb->ja", vc, pm[None, :] + dd[:, None] * (ez.T @ design))
+    t, b = ab[:, 0], ab[:, 1]
+    _, vz = _moments(t[None, :] + x[:, None] * b[None, :], dd, yy)
+    rate = 0.5 * jnp.sum(
+        ez * ez
+        + vz
+        + t[None, :] ** 2
+        + (x * x + vx)[:, None] * ebb[None, :]
+        - 2 * ez * t[None, :]
+        - 2 * ez * x[:, None] * b[None, :]
+        + 2 * t[None, :] * x[:, None] * b[None, :],
+        axis=0,
+    )
+    dd = shape / rate
+    return t, b, x, dd, vx, vc, rate
 
 
 def ord_irt(responses, *, starts: OrdinalStarts, priors: OrdinalPriors, control=None):
@@ -92,60 +126,54 @@ def ord_irt(responses, *, starts: OrdinalStarts, priors: OrdinalPriors, control=
     # Preserve the integer division in the reference Gamma shape.
     shape = 1 + n // 2
 
-    def step(state):
-        t, b, x, dd, vx, vc, rate = state
-        ez, _ = _moments(t[None, :] + x[:, None] * b[None, :], dd, yy)
-        ebb = b * b
-        vx = 1 / (1 / xv + ebb @ dd)
-        x = vx * (xm / xv + ez @ (b * dd) - jnp.sum(b * t * dd))
-        design = jnp.stack([jnp.ones(n), x], axis=1)
-        moment = (design.T @ design).at[1, 1].add(n * vx)
-        vc = jnp.linalg.inv(precision[None, :, :] + dd[:, None, None] * moment)
-        ab = jnp.einsum("jab,jb->ja", vc, pm[None, :] + dd[:, None] * (ez.T @ design))
-        t, b = ab[:, 0], ab[:, 1]
-        _, vz = _moments(t[None, :] + x[:, None] * b[None, :], dd, yy)
-        rate = 0.5 * jnp.sum(
-            ez * ez
-            + vz
-            + t[None, :] ** 2
-            + (x * x + vx)[:, None] * ebb[None, :]
-            - 2 * ez * t[None, :]
-            - 2 * ez * x[:, None] * b[None, :]
-            + 2 * t[None, :] * x[:, None] * b[None, :],
-            axis=0,
-        )
-        dd = shape / rate
-        return t, b, x, dd, vx, vc, rate
+    data = (yy, precision, pm, jnp.asarray(xm), jnp.asarray(xv))
 
-    update = jax.jit(step) if c.jit else step
+    def update(state):
+        return _ordinal_step(state, data)
+
     state = (
         *map(jnp.asarray, arrays),
         jnp.asarray(xv),
         jnp.zeros((m, 2, 2)),
         jnp.ones(m),
     )
-    history = []
-    converged = False
-    for iteration in range(1, c.max_iter + 1):
-        old = state
-        state = update(state)
-        if (
-            not all(np.isfinite(np.asarray(a)).all() for a in state)
-            or (np.asarray(state[3]) <= 0).any()
-        ):
-            raise FloatingPointError(f"Invalid update at iteration {iteration}")
-        errors = []
-        for u, v in zip(old[:4], state[:4]):
-            u, v = np.asarray(u), np.asarray(v)
-            errors.append(
-                float(max(0, 1 - np.corrcoef(u, v)[0, 1]))
-                if c.convergence == "correlation" and np.std(u) > 0 and np.std(v) > 0
-                else float(np.max(np.abs(u - v)))
-            )
-        history.append(errors)
-        if iteration > 2 and max(errors) < c.tolerance:
-            converged = True
-            break
+    if c.jit:
+        state, converged, iteration, history = run_explicit(
+            _ordinal_step,
+            state,
+            data,
+            count=4,
+            max_iter=c.max_iter,
+            tolerance=c.tolerance,
+            correlation=c.convergence == "correlation",
+            min_iter=3,
+            valid=_ordinal_valid,
+        )
+    else:
+        history = []
+        converged = False
+        for iteration in range(1, c.max_iter + 1):
+            old = state
+            state = update(state)
+            if (
+                not all(np.isfinite(np.asarray(a)).all() for a in state)
+                or (np.asarray(state[3]) <= 0).any()
+            ):
+                raise FloatingPointError(f"Invalid update at iteration {iteration}")
+            errors = []
+            for u, v in zip(old[:4], state[:4]):
+                u, v = np.asarray(u), np.asarray(v)
+                errors.append(
+                    float(max(0, 1 - np.corrcoef(u, v)[0, 1]))
+                    if c.convergence == "correlation"
+                    and np.std(u) > 0
+                    and np.std(v) > 0
+                    else float(np.max(np.abs(u - v)))
+                )
+            history.append(errors)
+            if iteration > 2 and max(errors) < c.tolerance:
+                converged = True
+                break
     t, b, x, dd, vx, vc, rate = state
     delta = jnp.exp(gammaln(shape + 0.5) - gammaln(shape)) / jnp.sqrt(rate)
     eta = t[None, :] + x[:, None] * b[None, :]

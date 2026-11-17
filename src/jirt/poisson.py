@@ -3,8 +3,41 @@
 import jax
 import jax.numpy as jnp
 import numpy as np
+from ._iteration import run_explicit
 from .binary import Control, FitResult
 from .types import PoissonStarts, PoissonPriors
+
+
+def _poisson_step(state, data):
+    yy, ix, mu, precision = data
+    pa, pp, pb, px = precision
+    ma, mp, mb, mx = mu
+    ni = state[3].shape[0]
+
+    def aggregate(v):
+        return jnp.zeros(ni).at[ix].add(v)
+
+    a, p, b, x, vb, vx, xi = state
+    xi = a[None, :] + p[:, None] + b[:, None] * x[ix][None, :]
+    e = jnp.exp(xi)
+    a = (
+        jnp.sum(
+            yy - e - e * (p[:, None] + b[:, None] * x[ix][None, :]) + e * xi, axis=0
+        )
+        + ma * pa
+    ) / (jnp.sum(e, axis=0) + pa)
+    vb = 1 / (e @ (x * x + vx)[ix] + pb)
+    vx = 1 / (aggregate((b * b + vb) @ e) + px)
+    residual = yy - e + e * xi - e * (a[None, :] + p[:, None])
+    x = vx * (aggregate(b @ residual) + mx * px)
+    b = vb * (residual @ x[ix] + mb * pb)
+    p = (
+        jnp.sum(
+            yy - e + e * xi - e * (a[None, :] + b[:, None] * x[ix][None, :]), axis=1
+        )
+        + mp * pp
+    ) / (jnp.sum(e, axis=1) + pp)
+    return a, p, b, x, vb, vx, xi
 
 
 def pois_irt(
@@ -69,58 +102,49 @@ def pois_irt(
         or c.convergence not in ("absolute", "correlation")
     ):
         raise ValueError("Invalid controls")
-    pa, pp, pb, px = precision
-    ma, mp, mb, mx = mu
     yy = jnp.asarray(y)
     ix = jnp.asarray(idx)
 
-    def aggregate(v):
-        return jnp.zeros(ni).at[ix].add(v)
+    data = (yy, ix, jnp.asarray(mu), jnp.asarray(precision))
 
     def step(state):
-        a, p, b, x, vb, vx, xi = state
-        xi = a[None, :] + p[:, None] + b[:, None] * x[ix][None, :]
-        e = jnp.exp(xi)
-        a = (
-            jnp.sum(
-                yy - e - e * (p[:, None] + b[:, None] * x[ix][None, :]) + e * xi, axis=0
-            )
-            + ma * pa
-        ) / (jnp.sum(e, axis=0) + pa)
-        vb = 1 / (e @ (x * x + vx)[ix] + pb)
-        vx = 1 / (aggregate((b * b + vb) @ e) + px)
-        residual = yy - e + e * xi - e * (a[None, :] + p[:, None])
-        x = vx * (aggregate(b @ residual) + mx * px)
-        b = vb * (residual @ x[ix] + mb * pb)
-        p = (
-            jnp.sum(
-                yy - e + e * xi - e * (a[None, :] + b[:, None] * x[ix][None, :]), axis=1
-            )
-            + mp * pp
-        ) / (jnp.sum(e, axis=1) + pp)
-        return a, p, b, x, vb, vx, xi
+        return _poisson_step(state, data)
 
-    update = jax.jit(step) if c.jit else step
+    update = step
     state = (*map(jnp.asarray, params), jnp.ones(nj), jnp.ones(ni), jnp.zeros_like(yy))
-    history = []
-    converged = False
-    for iteration in range(1, c.max_iter + 1):
-        old = state
-        state = update(state)
-        if not all(np.isfinite(np.asarray(a)).all() for a in state):
-            raise FloatingPointError(f"Nonfinite update at iteration {iteration}")
-        errors = []
-        for u, v in zip(old[:4], state[:4]):
-            u, v = np.asarray(u), np.asarray(v)
-            errors.append(
-                float(max(0, 1 - np.corrcoef(u, v)[0, 1]))
-                if c.convergence == "correlation" and np.std(u) > 0 and np.std(v) > 0
-                else float(np.max(np.abs(u - v)))
-            )
-        history.append(errors)
-        if iteration > 2 and max(errors) < c.tolerance:
-            converged = True
-            break
+    if c.jit:
+        state, converged, iteration, history = run_explicit(
+            _poisson_step,
+            state,
+            data,
+            count=4,
+            max_iter=c.max_iter,
+            tolerance=c.tolerance,
+            correlation=c.convergence == "correlation",
+            min_iter=3,
+        )
+    else:
+        history = []
+        converged = False
+        for iteration in range(1, c.max_iter + 1):
+            old = state
+            state = update(state)
+            if not all(np.isfinite(np.asarray(a)).all() for a in state):
+                raise FloatingPointError(f"Nonfinite update at iteration {iteration}")
+            errors = []
+            for u, v in zip(old[:4], state[:4]):
+                u, v = np.asarray(u), np.asarray(v)
+                errors.append(
+                    float(max(0, 1 - np.corrcoef(u, v)[0, 1]))
+                    if c.convergence == "correlation"
+                    and np.std(u) > 0
+                    and np.std(v) > 0
+                    else float(np.max(np.abs(u - v)))
+                )
+            history.append(errors)
+            if iteration > 2 and max(errors) < c.tolerance:
+                converged = True
+                break
     a, p, b, x, vb, vx, xi = state
     return FitResult(
         dict(alpha=a, psi=p, beta=b, x=x, xi=xi),
