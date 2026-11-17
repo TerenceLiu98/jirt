@@ -38,4 +38,5 @@ jobs:
       - run: uv run python examples/multidimensional.py
       - run: uv run python examples/polytomous.py
       - run: uv run python examples/nominal.py
+      - run: uv run python examples/response_models.py
       - run: uv build

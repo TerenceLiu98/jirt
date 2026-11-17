@@ -11,6 +11,11 @@ from .multidimensional import (
     multidimensional_probabilities,
 )
 from .network import network_irt
+from .noncompensatory import (
+    NoncompensatoryResult,
+    noncompensatory_irt,
+    noncompensatory_probabilities,
+)
 from .nominal import (
     NominalResult,
     nominal_irt,
@@ -20,6 +25,7 @@ from .nominal import (
 from .ordinal import ord_irt
 from .poisson import pois_irt
 from .polytomous import PolytomousResult, polytomous_irt, polytomous_probabilities
+from .sequential import sequential_irt, sequential_probabilities
 from .utilities import convert_votes, get_starts, make_priors, network_starts
 
 __version__ = "0.1.0"
@@ -38,6 +44,9 @@ __all__ = [
     "multidimensional_irt",
     "multidimensional_probabilities",
     "network_irt",
+    "NoncompensatoryResult",
+    "noncompensatory_irt",
+    "noncompensatory_probabilities",
     "NominalResult",
     "nominal_irt",
     "nominal_probabilities",
@@ -47,6 +56,8 @@ __all__ = [
     "PolytomousResult",
     "polytomous_irt",
     "polytomous_probabilities",
+    "sequential_irt",
+    "sequential_probabilities",
     "convert_votes",
     "get_starts",
     "make_priors",

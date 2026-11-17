@@ -44,6 +44,8 @@ print(result.means["x"], result.converged)
 
 | Function | Formulas | Input | Main parameters |
 | --- | --- | --- | --- |
+| `noncompensatory_irt` | $P(Y_{ij}=1)=c_j+(1-c_j)\prod_{h\in A_j}\mathrm{sigmoid}(a_{jh}\theta_{ih}+d_{jh})$ | Binary responses; NaN missing; explicit loading mask | `a`, `d`, `c`, EAP `x`; PC1PL, PC2PL or PC3PL |
+| `sequential_irt` | $P(Y_{ij}=k)=(1-q_{jk})\prod_{h<k}q_{jh}$, $q_{jh}=\mathrm{sigmoid}(a_j(\theta_i-b_{jh}))$; final category passes every stage | 0-based ordered categories; NaN missing; declared category counts | `a`, `steps`, EAP `x`; sequential or unit-slope Tutz |
 | `nominal_irt` | Nominal: $P(Y_{ij}=k)=\mathrm{softmax}_k(s_{jk}\theta_i+t_{jk})$; nested: key probability $q_j$, distractor mass $1-q_j$ | Unordered 0-based categories; NaN missing; counts and optional answer keys | `slopes`, `intercepts`, EAP `x`; nested `a`, `b`, `c`, `u` |
 | `polytomous_irt` | GRM: $P(Y_{ij}\ge k)=\mathrm{sigmoid}(a_j(\theta_i-b_{jk}))$; GPCM: $P(Y_{ij}=k)\propto\exp(a_j\sum_{h=1}^k(\theta_i-b_{jh}))$ | 0-based categories; NaN missing; declared category counts | `a`, `steps`, EAP `x`; GRM, PCM, GPCM or RSM |
 | `multidimensional_irt` | $P(Y_{ij}=1)=\mathrm{sigmoid}(a_j^T\theta_i+d_j)$ | Subject × item 0/1 responses; NaN missing; loading mask or testlet groups | `a`, `d`, EAP `x`; multidimensional 2PL, bifactor or testlet |
@@ -89,6 +91,10 @@ logistic variants.
 and shared testlet effects under a standard multivariate normal ability
 distribution. Run `uv run python examples/multidimensional.py` for examples.
 
+`noncompensatory_irt` models success as a product across required dimensions.
+`sequential_irt` models ordered responses as successive stage decisions. Run
+`uv run python examples/response_models.py` for both mechanisms.
+
 See [API.md](API.md) for parameter shapes and identification constraints.
 
 ## TODO
@@ -97,7 +103,7 @@ See [API.md](API.md) for parameter shapes and identification constraints.
 - [x] Multidimensional IRT, including bifactor and testlet models.
 - [x] General polytomous IRT: graded response, partial credit and rating scale models.
 - [x] Nominal and nested response models.
-- [ ] Noncompensatory and sequential response models.
+- [x] Noncompensatory and sequential response models.
 - [ ] Unfolding models, including GGUM.
 - [ ] Multiple-group and mixture IRT, including zero-inflated response models.
 - [ ] Cognitive diagnosis models, including DINA and DINO.
