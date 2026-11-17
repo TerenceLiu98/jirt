@@ -343,3 +343,50 @@ The regression tests enforce independent-fit agreement as well. Generated
 reports remain ignored under `outputs/multidimensional/`; R is unnecessary for
 routine Python regression tests. The structured example uses 3,000 simulated
 subjects, nine items, and partial missingness; all three specifications converge.
+
+## General polytomous calibration
+
+GRM, PCM, GPCM and RSM are checked against independently fitted R mirt 1.48.5
+(reference commit `211851adae7a6bee580af830d37187f0e81a5ca8`, R 4.5.1).
+Both packages use fixed N(0,1), no item priors, and identical 41-point
+Gauss–Hermite quadrature. Four-item synthetic response-pattern tables contain
+approximately 100,000 subjects each. GRM/PCM/GPCM use category counts 2,3,4,3;
+RSM uses three categories on each item. Independent SciPy formulas generate the
+pattern frequencies. PCM/GPCM recovery includes deliberately unordered steps.
+
+R uses `graded`, `gpcmIRT` (unit slopes for PCM), and `rsm`, explicitly fixing
+latent variance. RSM's effective steps are b_k-c_j/a_j; these are converted to
+jirt's item-plus-centered-shared-step convention. Both calibrations start with
+unit slopes and evenly spaced steps, not reference estimates. mirt uses EM with
+nlminb M-steps, outer tolerance 1e-9 and no acceleration; jirt uses SLSQP with
+mean-loss tolerance 1e-13. All fits converge.
+
+| Model | Max slope difference | Max step difference | Max probability difference | Total log-likelihood difference |
+| --- | ---: | ---: | ---: | ---: |
+| GRM | 2.60e-6 | 1.47e-6 | 7.67e-7 | 8.61e-9 |
+| PCM | 0 | 8.45e-7 | 1.75e-7 | 1.34e-9 |
+| GPCM | 4.30e-6 | 5.43e-6 | 7.51e-7 | 1.34e-8 |
+| RSM | 0 | 6.67e-7 | 2.22e-7 | 2.50e-9 |
+
+Probabilities are compared on 41 ability points over [-4,4]. At identical
+parameters, probability errors are below 2.7e-15. EAP and posterior variance
+comparisons are also enforced in the regression tests. The separate unit tests
+cover normalization, extreme binary predictors, mixed category counts, binary
+reductions, GRM ordering, PCM/RSM restrictions of GPCM, unobserved categories,
+missingness, JIT/eager agreement and parameter recovery. Existing ordinal tests
+remain part of the full suite. R is optional for normal Python tests.
+
+```sh
+sh scripts/build_mirt_reference.sh
+uv run python scripts/prepare_polytomous_reference.py
+Rscript --vanilla scripts/export_polytomous_reference.R
+uv run python scripts/check_polytomous_reference.py
+# After reviewing comparison.json:
+cp outputs/polytomous/fixture.json tests/fixtures/polytomous_mirt.json
+uv run pytest tests/test_polytomous.py tests/test_polytomous_mirt.py
+uv run python examples/polytomous.py
+```
+
+Generated reports stay in ignored `outputs/polytomous/`; only the reproducible
+regression fixture is tracked. These small matched cases validate implementation
+agreement, not global optimization or identification for arbitrary sparse data.
