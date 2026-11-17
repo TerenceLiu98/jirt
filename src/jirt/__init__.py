@@ -11,6 +11,12 @@ from .multidimensional import (
     multidimensional_probabilities,
 )
 from .network import network_irt
+from .nominal import (
+    NominalResult,
+    nominal_irt,
+    nominal_probabilities,
+    nested_probabilities,
+)
 from .ordinal import ord_irt
 from .poisson import pois_irt
 from .polytomous import PolytomousResult, polytomous_irt, polytomous_probabilities
@@ -32,6 +38,10 @@ __all__ = [
     "multidimensional_irt",
     "multidimensional_probabilities",
     "network_irt",
+    "NominalResult",
+    "nominal_irt",
+    "nominal_probabilities",
+    "nested_probabilities",
     "ord_irt",
     "pois_irt",
     "PolytomousResult",
