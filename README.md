@@ -44,6 +44,7 @@ print(result.means["x"], result.converged)
 
 | Function | Formulas | Input | Main parameters |
 | --- | --- | --- | --- |
+| `multidimensional_irt` | $P(Y_{ij}=1)=\mathrm{sigmoid}(a_j^T\theta_i+d_j)$ | Subject × item 0/1 responses; NaN missing; loading mask or testlet groups | `a`, `d`, EAP `x`; multidimensional 2PL, bifactor or testlet |
 | `logistic_irt` | $P(Y_{ij}=1)=c_j+(u_j-c_j)\mathrm{sigmoid}(a_j(\theta_i-b_j))$ | Subject × item responses, 0/1; NaN missing | `a`, `b`, `c`, `u`, EAP `x`; Rasch, shared-slope 1PL, 2PL, 3PL or full 4PL |
 | `bin_irt` | $P(Y_{ij}=1)=\Phi(\alpha_j+\beta_j x_i)$ | Subject × item votes, -1/1; 0/9 missing | `x`; output `beta` contains intercept $\alpha$ and slope $\beta$ |
 | `ord_irt` | $\mu_{ij}=\tau_j+\beta_j x_i$; $P(Y_{ij}\le k)=\Phi((c_k-\mu_{ij})\Delta_j)$, $c_1=0,c_2=1$ | Subject × item categories 1/2/3; 0 missing | `x`, `beta`, `tau`, `Delta`, `Delta_sq` |
@@ -82,12 +83,16 @@ variances and optimizer diagnostics. Its controls and response coding differ
 from the probit estimators. Run `uv run python examples/logistic.py` for the
 logistic variants.
 
-See [API.md](API.md) for all parameter shapes.
+`multidimensional_irt` supports confirmatory loading masks, bifactor loadings
+and shared testlet effects under a standard multivariate normal ability
+distribution. Run `uv run python examples/multidimensional.py` for examples.
+
+See [API.md](API.md) for parameter shapes and identification constraints.
 
 ## TODO
 
 - [x] Logistic IRT: Rasch/1PL, 2PL, 3PL and 4PL.
-- [ ] Multidimensional IRT, including bifactor and testlet models.
+- [x] Multidimensional IRT, including bifactor and testlet models.
 - [ ] General polytomous IRT: graded response, partial credit and rating scale models.
 - [ ] Nominal and nested response models.
 - [ ] Noncompensatory and sequential response models.
