@@ -13,6 +13,7 @@ from .multidimensional import (
 from .network import network_irt
 from .ordinal import ord_irt
 from .poisson import pois_irt
+from .polytomous import PolytomousResult, polytomous_irt, polytomous_probabilities
 from .utilities import convert_votes, get_starts, make_priors, network_starts
 
 __version__ = "0.1.0"
@@ -33,6 +34,9 @@ __all__ = [
     "network_irt",
     "ord_irt",
     "pois_irt",
+    "PolytomousResult",
+    "polytomous_irt",
+    "polytomous_probabilities",
     "convert_votes",
     "get_starts",
     "make_priors",

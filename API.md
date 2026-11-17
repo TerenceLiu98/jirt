@@ -178,3 +178,53 @@ supporting JIT and autodifferentiation; fitting is not end-to-end differentiable
 optimization. `tolerance` controls mean-loss SLSQP stopping precision. Reaching
 the iteration limit returns a result with `converged=False`. See
 `uv run python examples/multidimensional.py` for all three structures.
+
+## General polytomous logistic IRT
+
+`polytomous_irt(responses, category_counts=..., model="grm", starts=None,
+quadrature_points=41, max_iter=1000, tolerance=1e-10, jit=True)` fits GRM, PCM,
+GPCM or RSM. Responses are integer labels `0,...,K_j-1`, with NaN missing.
+Declare every item's category count explicitly; unobserved categories are retained,
+not recoded or dropped. GRM, PCM and GPCM permit different counts across items;
+RSM requires a common count. Each item needs an observed response. Empty
+categories can drive thresholds/steps toward boundaries; convergence is not a
+certificate of finite, well-identified estimates. No pseudo-counts are added.
+
+For GRM, `P(Y>=k)=sigmoid(a_j*(theta-b_jk))` for k=1,...,K_j-1. Category
+probabilities are successive cumulative differences. Slopes are positive and
+thresholds strictly increasing, with a numerical minimum gap of 1e-6. Log
+probabilities use a stable difference formula rather than subtracting saturated
+sigmoid values.
+
+For GPCM, category k has unnormalized log probability
+`a_j * sum(theta-b_jh, h=1,...,k)`; category zero has logit zero. PCM fixes
+`a_j=1`. Their adjacent-category step difficulties **need not be ordered**.
+RSM further constrains steps to `b_j + tau_k`, with unit slopes and
+`sum(tau)=0`. Centering shared steps identifies the decomposition into item
+locations and category effects; it does not impose threshold ordering.
+All four models fix ability to N(0,1) and use no item priors. Positive slopes
+fix the direction of increasing ability. These logistic models do not change
+the existing three-category probit `ord_irt` API or behavior.
+
+`starts` optionally supplies `steps` of shape `(J,max(K)-1)` and, for GRM/GPCM,
+`a` of shape `(J,)`. Valid steps must be finite; padding is ignored and can be
+NaN. RSM starts must admit the shared-step decomposition. Defaults are unit
+slopes and evenly spaced steps from -1 to 1 (zero for binary items). Numerical
+slope bounds are a>=1e-6. Fitting uses SLSQP with JAX derivatives and Gauss–Hermite
+marginal likelihood. `tolerance` is ftol on mean negative marginal likelihood.
+
+`PolytomousResult.means` contains `a`, padded `steps` and EAP `x`. RSM also
+returns item locations `b` and centered shared `tau`. `variances["x"]` gives
+conditional posterior variances, excluding item uncertainty. Fully missing
+subjects receive the N(0,1) prior. `category_counts` preserves declared counts.
+`converged`, `iterations`, `message`, `trace` and `log_likelihood` expose fitting
+status and the total marginal log likelihood; iteration-limit results have
+`converged=False`.
+
+`predict(theta)` returns `(N,J,max(K))` category probabilities with exactly zero
+padding for nonexistent categories. Omitting theta uses EAP scores, as does the
+`probabilities` property; these are plug-in, not posterior-integrated predictions.
+`polytomous_probabilities(theta, a=..., steps=..., category_counts=..., model=...)`
+is a pure JAX function (make model static for JIT). It assumes valid shapes and
+constraints; PCM/RSM force unit slopes. Supply shared RSM steps when using this
+low-level function. Run `uv run python examples/polytomous.py` for all four models.

@@ -44,6 +44,7 @@ print(result.means["x"], result.converged)
 
 | Function | Formulas | Input | Main parameters |
 | --- | --- | --- | --- |
+| `polytomous_irt` | GRM: $P(Y_{ij}\ge k)=\mathrm{sigmoid}(a_j(\theta_i-b_{jk}))$; GPCM: $P(Y_{ij}=k)\propto\exp(a_j\sum_{h=1}^k(\theta_i-b_{jh}))$ | 0-based categories; NaN missing; declared category counts | `a`, `steps`, EAP `x`; GRM, PCM, GPCM or RSM |
 | `multidimensional_irt` | $P(Y_{ij}=1)=\mathrm{sigmoid}(a_j^T\theta_i+d_j)$ | Subject × item 0/1 responses; NaN missing; loading mask or testlet groups | `a`, `d`, EAP `x`; multidimensional 2PL, bifactor or testlet |
 | `logistic_irt` | $P(Y_{ij}=1)=c_j+(u_j-c_j)\mathrm{sigmoid}(a_j(\theta_i-b_j))$ | Subject × item responses, 0/1; NaN missing | `a`, `b`, `c`, `u`, EAP `x`; Rasch, shared-slope 1PL, 2PL, 3PL or full 4PL |
 | `bin_irt` | $P(Y_{ij}=1)=\Phi(\alpha_j+\beta_j x_i)$ | Subject × item votes, -1/1; 0/9 missing | `x`; output `beta` contains intercept $\alpha$ and slope $\beta$ |
@@ -93,7 +94,7 @@ See [API.md](API.md) for parameter shapes and identification constraints.
 
 - [x] Logistic IRT: Rasch/1PL, 2PL, 3PL and 4PL.
 - [x] Multidimensional IRT, including bifactor and testlet models.
-- [ ] General polytomous IRT: graded response, partial credit and rating scale models.
+- [x] General polytomous IRT: graded response, partial credit and rating scale models.
 - [ ] Nominal and nested response models.
 - [ ] Noncompensatory and sequential response models.
 - [ ] Unfolding models, including GGUM.
