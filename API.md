@@ -390,3 +390,98 @@ items are rejected. `predict(theta)` and `probabilities` return
 at EAP scores. `ggum_probabilities` is a differentiable pure JAX function with
 the same parameter conventions; callers provide valid shapes and restrictions.
 See `examples/unfolding.py` for synthetic attitude responses and two-start fitting.
+
+## Observed groups and latent mixtures
+
+`group_irt` fits **known groups** supplied as contiguous integer labels `0..G-1`.
+`mixture_irt` fits **unknown latent classes** and estimates their weights and
+posterior memberships. Both support `model="rasch"`, `"2pl"` (default), and
+`"grm"`. These APIs are distinct from `hier_irt`'s probit regression on covariates.
+
+Responses are `(N,J)` zero-based categories with NaN missing. Binary models use
+0/1; GRM requires explicit integer `category_counts` `(J,)`, each >=2, and permits
+mixed counts. Entirely missing items are rejected. A group-specific item also
+needs observations in its own group; a fully shared item can borrow observations
+from other groups.
+
+```python
+fit = group_irt(
+    responses, groups=labels, model="grm", category_counts=counts,
+    shared_a=anchors, shared_steps=anchors, free_distribution=True,
+    starts={"a": slopes, "steps": thresholds},
+)
+fit = mixture_irt(
+    responses, classes=2, starts=[start1, start2], model="2pl",
+)
+```
+
+Here `C` denotes G observed groups or the number of regular latent classes:
+
+- `a` `(C,J)` contains positive discriminations; Rasch fixes all of them to one.
+- `steps` `(C,J,max(K)-1)` contains difficulties/thresholds; GRM thresholds must
+  be strictly increasing. Binary items have one difficulty. Unused padding is
+  ignored and returned as zero.
+- `shared_a` and `shared_steps` are boolean `(J,)` arrays. True ties that item's
+  corresponding parameters across **all** groups/classes; false frees them.
+  Sharing defaults to false. A steps flag ties the full threshold vector;
+  it means equal difficulties, not equal logistic intercepts when slopes differ.
+- `mu` and `sigma` `(C,)` describe normal latent distributions. By default all
+  are fixed to zero/one. `free_distribution=True` estimates means and SDs outside
+  reference group/class zero, which stays N(0,1). At least two items must share
+  both slopes and thresholds as anchors (Rasch slopes are already shared).
+  These linking constraints do not guarantee identification for every dataset.
+
+`starts` requires `steps` and optionally supplies `a` (defaults to one), `mu`
+(zero), `sigma` (one) and mixture `weights` (uniform). Shared parameters require
+equal starts. Fixed distributions must start at their fixed values. Item slopes
+have minimum `1e-6`, threshold gaps minimum `1e-6`, and free SDs minimum `1e-3`.
+Positive slopes fix orientation. No item priors are applied. Without free
+latent distributions, each group's/class's N(0,1) identifies its own scale.
+
+Controls: `quadrature_points=41`, `max_iter=2000`, `tolerance=1e-10`, `jit=True`.
+Enable JAX x64. Fitting compresses response patterns (within observed group),
+uses Gauss–Hermite marginal likelihood with nodes transformed for each normal
+component, and optimizes mean negative log likelihood with SLSQP/JAX derivatives.
+More quadrature nodes may be needed for sharply peaked integrands.
+
+For mixtures, `classes` counts regular IRT components. `starts` can be one dict
+or a nonempty list of dicts. All supplied starts are fit; the highest-likelihood
+converged fit is returned, or the highest-likelihood unconverged fit if none
+converges. `start_log_likelihoods` records all runs in input order. Use separated
+initial class profiles and multiple starts; convergence does not establish a
+global optimum. Class labels are arbitrary, so align parameter/weight arrays
+before comparing fits. Weight starts must be positive and sum to one. Fitting
+uses softmax weights with reference logit zero and other log ratios bounded to
+[-20,20]; fitted weights are positive rather than exactly zero. Pure prediction
+functions permit exact zero weights for limiting cases.
+
+### Structural lowest-category component
+
+`mixture_irt(..., zero_inflated=True)` appends **one** structural component after
+the `classes` regular components. It deterministically emits category zero on
+all items and has no item or ability parameters. Weights and posterior
+memberships therefore have `C+1` entries/columns. An all-zero pattern can arise
+from either regular or structural components; it is never coded as missing.
+Any observed positive category makes structural membership exactly zero.
+Missing responses impose no restriction: a partly missing/all-observed-zero
+pattern is compatible with the structural component. An entirely missing
+person has the prior class weights.
+
+`GroupIRTResult.means` contains item/distribution arrays, `class_x` `(N,C)`
+conditional EAP scores and `x` `(N,)`; `variances` contains corresponding
+conditional variances. For known groups, `x` uses the observed group. For
+mixtures it averages regular-class posteriors, including between-class variance.
+**With a structural component, x and its variance condition on belonging to a
+regular class**: no artificial extreme ability is assigned to structural
+respondents. All variances exclude item-estimation uncertainty.
+
+`memberships` `(N,C)` or `(N,C+1)` and `weights` are returned for mixtures;
+observed-group fits instead retain `groups` and return None for those fields.
+`predict(theta, groups=...)` predicts known-group item probabilities.
+Mixture `predict(theta)` uses prior class weights at the common supplied ability;
+it does not use the person's posterior memberships. Both return `(N,J,max(K))`
+with zero padding. A mixture of item marginals must not be multiplied to compute
+pattern probabilities: the latent class is shared across a person's items.
+`group_probabilities` and `mixture_probabilities` are pure JAX prediction kernels;
+callers supply valid shapes, category restrictions and normalized weights.
+See `examples/groups.py` for all three mechanisms.

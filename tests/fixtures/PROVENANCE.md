@@ -84,3 +84,14 @@ parameters, conditional curves, likelihood and EAP moments. Threshold sign,
 order constraints and optimizer settings are documented in `VALIDATION.md`.
 It is a regression baseline, not a runtime report; generated comparison reports
 remain ignored in outputs/ggum/.
+
+## Group/mixture mirt fixture
+
+`groups_mirt.json` stores independently generated SciPy pattern frequencies and
+R mirt 1.48.5 outputs (source commit `211851adae7a6bee580af830d37187f0e81a5ca8`,
+R 4.5.1). Six cases cover observed groups, two-class mixtures and structural-zero
+mixtures for 2PL and GRM. The prepare/fit/export/check group reference scripts
+record starts, quadrature, shared anchors, group distributions and class weights.
+`VALIDATION.md` explains the R structural-zero approximation, integration grids,
+label alignment and independent R membership calculation. Runtime reports stay
+ignored in outputs/groups/; this tracked fixture is a regression baseline.

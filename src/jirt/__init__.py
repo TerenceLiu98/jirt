@@ -4,6 +4,13 @@ from .binary import Control, FitResult, bin_irt
 from .bootstrap import BootstrapResult, bootstrap
 from .dynamic import dyn_irt
 from .hierarchical import hier_irt
+from .groups import (
+    GroupIRTResult,
+    group_irt,
+    group_probabilities,
+    mixture_irt,
+    mixture_probabilities,
+)
 from .logistic import LogisticResult, logistic_irt, logistic_probabilities
 from .multidimensional import (
     MultidimensionalResult,
@@ -38,6 +45,11 @@ __all__ = [
     "bootstrap",
     "dyn_irt",
     "hier_irt",
+    "GroupIRTResult",
+    "group_irt",
+    "group_probabilities",
+    "mixture_irt",
+    "mixture_probabilities",
     "LogisticResult",
     "logistic_irt",
     "logistic_probabilities",
