@@ -44,6 +44,7 @@ print(result.means["x"], result.converged)
 
 | Function | Formulas | Input | Main parameters |
 | --- | --- | --- | --- |
+| `diagnostic_irt` | $P(Y_{ij}=1)=g_j+(1-s_j-g_j)\eta_j(\alpha_i)$; DINA requires all skills, DINO any required skill | Binary responses; NaN missing; item × attribute Q matrix | `slip`, `guess`, profile weights, posterior profile and mastery probabilities |
 | `group_irt` | $P(Y_{ij}\ge k\mid g_i)=\mathrm{sigmoid}(a_{g_i j}(\theta_i-b_{g_i jk}))$; $\theta_i\mid g_i\sim N(\mu_{g_i},\sigma_{g_i}^2)$ | Binary or ordered categories; NaN missing; observed group labels and sharing masks | Group `a`, `steps`, `mu`, `sigma`, EAP `x`; Rasch, 2PL or GRM |
 | `mixture_irt` | $P(\mathbf y_i)=\sum_c\pi_c P_c(\mathbf y_i)$; optional structural component $P_0(\mathbf y_i)=\mathbf1[\text{all observed responses}=0]$ | Binary or ordered categories; NaN missing; class count and starts | Class parameters, weights, posterior memberships; optional zero inflation |
 | `ggum_irt` | $P(Y_{ij}=k)\propto e^{a_j\sum_{h=1}^k\tau_{jh}}\cosh((K_j-\frac12-k)a_j(\theta_i-\delta_j))$ | Binary or ordered 0-based categories; NaN missing; declared counts and starts | `a`, ideal locations `delta`, thresholds `tau`, EAP `x` |
@@ -107,6 +108,9 @@ optionally a structural all-lowest-response class. Run
 `uv run python examples/groups.py` for shared anchors, multiple starts and
 zero inflation.
 
+`diagnostic_irt` estimates discrete skill mastery under DINA or DINO. Run
+`uv run python examples/diagnostic.py` for a reproducible diagnostic example.
+
 See [API.md](API.md) for parameter shapes and identification constraints.
 
 ## TODO
@@ -118,5 +122,5 @@ See [API.md](API.md) for parameter shapes and identification constraints.
 - [x] Noncompensatory and sequential response models.
 - [x] Unfolding models: unidimensional GGUM for binary and polytomous responses.
 - [x] Multiple-group and mixture IRT, including zero-inflated binary/graded responses.
-- [ ] Cognitive diagnosis models, including DINA and DINO.
+- [x] Cognitive diagnosis models: DINA and DINO.
 - [ ] Amortized IRT using item content.

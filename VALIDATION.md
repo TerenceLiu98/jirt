@@ -630,3 +630,37 @@ allows routine tests without R; reference source trees remain unchanged.
 References: Chalmers (2012), [doi:10.18637/jss.v048.i06](https://doi.org/10.18637/jss.v048.i06);
 Rost (1990), [doi:10.1177/014662169001400305](https://doi.org/10.1177/014662169001400305);
 Wall, Park & Moustaki (2015), [doi:10.1177/0146621615588184](https://doi.org/10.1177/0146621615588184).
+
+## DINA and DINO cognitive diagnosis
+
+`tests/test_diagnostic_reference.py` implements an independent NumPy/SciPy
+reference: enumerate profiles and response patterns, compute Bernoulli pattern
+likelihoods directly, and optimize the marginal likelihood with SLSQP numerical
+derivatives. It does not call the JAX probability kernel or reuse the EM updates.
+Both DINA and DINO use six items for two skills, with repeated single-skill and
+combined-skill requirements. Deterministic frequencies approximate 100,000
+subjects, with partial and fully missing patterns added. Bounds and the
+`guess+slip<=1` constraint match. The reference uses SLSQP ftol=1e-13; JAX uses
+EM mean-likelihood tolerance 1e-13 and up to 5,000 iterations. Tests require
+likelihood agreement within 1e-5, item/weight agreement within 2e-5 and posterior
+profile agreement within 3e-5. This is an independent optimizer comparison,
+not an external package benchmark.
+
+Separate simulations use 10,000 persons, nine items, nonuniform profile weights
+and 3% missing responses for each model. Tests require slip/guess recovery within
+0.025, weights within 0.02, joint-profile classification accuracy above 85%,
+normalized posteriors and a nondecreasing EM likelihood. Small hand-enumerated
+Q examples verify conjunctive/disjunctive differences and single-attribute
+item equivalence. Input tests reject invalid Q matrices and oversized profile
+enumeration. These informative small-Q cases do not guarantee identification
+or recovery for arbitrary attribute designs.
+
+```sh
+uv run pytest tests/test_diagnostic.py tests/test_diagnostic_reference.py
+uv run python examples/diagnostic.py
+```
+
+References: Junker & Sijtsma (2001),
+[doi:10.1177/01466210122032064](https://doi.org/10.1177/01466210122032064);
+Templin & Henson (2006),
+[doi:10.1037/1082-989X.11.3.287](https://doi.org/10.1037/1082-989X.11.3.287).

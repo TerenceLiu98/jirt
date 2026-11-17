@@ -485,3 +485,52 @@ pattern probabilities: the latent class is shared across a person's items.
 `group_probabilities` and `mixture_probabilities` are pure JAX prediction kernels;
 callers supply valid shapes, category restrictions and normalized weights.
 See `examples/groups.py` for all three mechanisms.
+
+## Cognitive diagnosis: DINA and DINO
+
+`diagnostic_irt(responses, q_matrix=Q, model="dina", ...)` estimates a distribution
+over discrete binary skill profiles. DINA requires **all** attributes listed in
+an item's Q row; `model="dino"` requires **any** listed attribute. Successful
+ideal responders answer correctly with probability `1-slip`; other profiles
+answer correctly with `guess`. This is discrete mastery, not continuous ability.
+
+Responses are `(N,J)` binary observations with NaN missing. Q is binary `(J,K)`;
+every row and column must contain at least one one. Empty requirement rows are
+rejected, avoiding different vacuous-rule interpretations. `mastery_profiles(K)`
+enumerates all `2**K` profiles lexicographically, with the last attribute changing
+fastest. Q columns label attributes, so the profile ordering is fixed.
+
+`starts` optionally contains `slip` and `guess` `(J,)` and positive `weights`
+`(2**K,)` summing to one. Defaults are slip=0.15, guess=0.2 and uniform weights.
+Exact finite-profile marginal-likelihood EM estimates all three, without priors.
+The item M-step enforces `1e-6 <= guess <= 1-slip <= 1-1e-6` via the constrained
+Bernoulli MLE; crossing unconstrained rates are pooled. Equality is allowed and
+means an uninformative item. Profile weights have a numerical mass floor of
+`1e-300` before renormalization; no statistical pseudocount is added.
+
+Controls: `max_iter=2000`, `tolerance=1e-9`, `jit=True`, `max_profiles=65536`.
+Enable JAX x64. Convergence uses the absolute total log-likelihood change divided
+by the number of subjects. Inspect `converged`, `iterations`, `log_likelihood`
+and `trace`. Multiple explicit starts are advisable for difficult likelihoods;
+a converged EM run does not establish a global optimum.
+
+Q validation does not establish statistical identification. Profiles with
+identical ideal-response vectors cannot be separated by the observed data, and
+insufficient single-attribute coverage or weak item discrimination can prevent
+recovery. Use a substantively justified, informative Q matrix; repeated
+single-attribute items plus combined items are illustrated in the example.
+Enumeration grows exponentially: for P unique response patterns, likelihood
+work scales roughly as `P*J*2**K`, with posterior storage `P*2**K` and returned
+person probabilities `N*2**K`. `max_profiles` rejects oversized enumeration but
+is not a total memory budget.
+
+`DiagnosticResult` returns `profiles`, `slip`, `guess`, `weights`,
+`profile_probabilities` `(N,2**K)` and `mastery_probabilities` `(N,K)`, the latter
+averaging profile attributes over each posterior. `classifications` returns the
+joint MAP profile; it need not equal thresholded marginal mastery probabilities.
+`predict(profiles)` returns profile-by-item success probabilities;
+`predict()` returns posterior predictive person-by-item probabilities.
+All-missing persons recover the profile prior. Entirely missing items are
+rejected; partial missing responses contribute neither successes nor failures.
+`diagnostic_probabilities` is a pure differentiable JAX kernel; callers provide
+valid profiles, Q and parameter restrictions. See `examples/diagnostic.py`.

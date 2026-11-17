@@ -41,4 +41,5 @@ jobs:
       - run: uv run python examples/response_models.py
       - run: uv run python examples/unfolding.py
       - run: uv run python examples/groups.py
+      - run: uv run python examples/diagnostic.py
       - run: uv build

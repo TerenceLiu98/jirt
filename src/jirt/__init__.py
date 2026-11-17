@@ -2,6 +2,12 @@
 
 from .binary import Control, FitResult, bin_irt
 from .bootstrap import BootstrapResult, bootstrap
+from .diagnostic import (
+    DiagnosticResult,
+    diagnostic_irt,
+    diagnostic_probabilities,
+    mastery_profiles,
+)
 from .dynamic import dyn_irt
 from .hierarchical import hier_irt
 from .groups import (
@@ -44,6 +50,10 @@ __all__ = [
     "bin_irt",
     "bootstrap",
     "dyn_irt",
+    "DiagnosticResult",
+    "diagnostic_irt",
+    "diagnostic_probabilities",
+    "mastery_profiles",
     "hier_irt",
     "GroupIRTResult",
     "group_irt",
