@@ -7,7 +7,7 @@
 [![uv](https://img.shields.io/badge/managed%20with-uv-DE5FE9)](https://docs.astral.sh/uv/)
 
 Item response theory in Python and JAX, with binary, ordinal, dynamic,
-hierarchical, network and Poisson models.
+hierarchical, network and Poisson models, plus logistic Rasch/1PL–4PL calibration.
 
 ## Environment
 
@@ -44,6 +44,7 @@ print(result.means["x"], result.converged)
 
 | Function | Formulas | Input | Main parameters |
 | --- | --- | --- | --- |
+| `logistic_irt` | $P(Y_{ij}=1)=c_j+(u_j-c_j)\mathrm{sigmoid}(a_j(\theta_i-b_j))$ | Subject × item responses, 0/1; NaN missing | `a`, `b`, `c`, `u`, EAP `x`; Rasch, shared-slope 1PL, 2PL, 3PL or full 4PL |
 | `bin_irt` | $P(Y_{ij}=1)=\Phi(\alpha_j+\beta_j x_i)$ | Subject × item votes, -1/1; 0/9 missing | `x`; output `beta` contains intercept $\alpha$ and slope $\beta$ |
 | `ord_irt` | $\mu_{ij}=\tau_j+\beta_j x_i$; $P(Y_{ij}\le k)=\Phi((c_k-\mu_{ij})\Delta_j)$, $c_1=0,c_2=1$ | Subject × item categories 1/2/3; 0 missing | `x`, `beta`, `tau`, `Delta`, `Delta_sq` |
 | `dyn_irt` | $P(Y_{ij}=1)=\Phi(\alpha_j+\beta_j x_{i,t_j})$; $x_{i,t}=x_{i,t-1}+\epsilon_{i,t}$, $\epsilon_{i,t}\sim N(0,\omega_i^2)$ | Subject × item votes, -1/1; 0 missing; item periods and inclusive subject tenures | `x` by subject and period, `alpha`, `beta`; fixed diffusion variance `omega2` |
@@ -52,17 +53,18 @@ print(result.means["x"], result.converged)
 | `pois_irt` | $Y_{jk}\sim\mathrm{Poisson}(\lambda_{jk})$; $\log\lambda_{jk}=\alpha_k+\psi_j+\beta_j x_{s(k)}$ | Term × document nonnegative counts; optional document-to-subject mapping | `alpha`, `psi`, `beta`, `x` |
 
 Here $\Phi$ is the standard normal cumulative distribution function. These are
-conditional response formulas given the model parameters. In the first five
+conditional response formulas given the model parameters. In the non-Poisson
 rows, $i$ indexes subjects and $j$ items; $t_j$ is the period of item $j$,
 $g_i$ is subject $i$'s group, and $z_i$ is their covariate vector. For the ordinal
 model, $k=1,2$ indexes the finite category boundaries and $\Delta_j>0$ is the
 inverse residual standard deviation. In the Poisson row, $j$ indexes terms,
 $k$ documents, and $s(k)$ maps a document to its subject (for example, its author).
 
-All indices start at zero. Supply starts and study-specific priors explicitly;
+All indices start at zero. For the six original estimators, supply starts and
+study-specific priors explicitly;
 function docstrings describe their shapes. Typed input mappings are available in
 `jirt.types`. Run `uv run python examples/all_models.py` for self-contained
-examples of all six models. `Control` selects the iteration limit,
+examples of those six models. `Control` selects the iteration limit,
 tolerance, JIT and correlation or absolute convergence criterion. Check
 `result.converged`: reaching the iteration limit returns the last finite estimate.
 `FitResult` includes means, variances, iteration count, convergence trace and
@@ -74,11 +76,17 @@ first. Dynamic estimates outside active tenure are zero and probabilities are Na
 dynamic and hierarchical fits with explicit random keys, replicate estimates,
 standard errors and failure diagnostics.
 
+`logistic_irt` uses standard-normal marginal maximum likelihood and returns a
+`LogisticResult` with item parameters, EAP person scores, conditional person
+variances and optimizer diagnostics. Its controls and response coding differ
+from the probit estimators. Run `uv run python examples/logistic.py` for the
+logistic variants.
+
 See [API.md](API.md) for all parameter shapes.
 
 ## TODO
 
-- [ ] Logistic IRT: Rasch/1PL, 2PL, 3PL and 4PL.
+- [x] Logistic IRT: Rasch/1PL, 2PL, 3PL and 4PL.
 - [ ] Multidimensional IRT, including bifactor and testlet models.
 - [ ] General polytomous IRT: graded response, partial credit and rating scale models.
 - [ ] Nominal and nested response models.

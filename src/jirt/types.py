@@ -9,6 +9,15 @@ from typing import Any, TypedDict
 ArrayLike = Any
 
 
+class LogisticStarts(TypedDict, total=False):
+    """Optional free item parameters; only keys estimated by the model are valid."""
+
+    a: ArrayLike
+    b: ArrayLike
+    c: ArrayLike
+    u: ArrayLike
+
+
 class BinaryStarts(TypedDict):
     alpha: ArrayLike
     beta: ArrayLike

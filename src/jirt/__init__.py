@@ -4,6 +4,7 @@ from .binary import Control, FitResult, bin_irt
 from .bootstrap import BootstrapResult, bootstrap
 from .dynamic import dyn_irt
 from .hierarchical import hier_irt
+from .logistic import LogisticResult, logistic_irt, logistic_probabilities
 from .network import network_irt
 from .ordinal import ord_irt
 from .poisson import pois_irt
@@ -18,6 +19,9 @@ __all__ = [
     "bootstrap",
     "dyn_irt",
     "hier_irt",
+    "LogisticResult",
+    "logistic_irt",
+    "logistic_probabilities",
     "network_irt",
     "ord_irt",
     "pois_irt",

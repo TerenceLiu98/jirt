@@ -58,3 +58,47 @@ replicates, `converged` reports each stopping status, and `failures` maps failed
 replicate numbers to errors. Original missingness and dynamic tenure masks are
 preserved. `pseudo_data` optionally supplies a full stack of predetermined
 replicates for independent validation.
+
+## Logistic IRT
+
+`logistic_irt(responses, model="2pl", starts=None, quadrature_points=41,
+max_iter=1000, tolerance=1e-8, jit=True)` fits binary **0/1** responses with
+**NaN** for missing observations. Zero is an observed failure, unlike the
+missing-value convention of `bin_irt`.
+
+The response curve is `c + (u-c) * sigmoid(a * (theta-b))`. Model options are
+`rasch` (a fixed at 1), `1pl` (one estimated shared a), `2pl` (item-specific a),
+`3pl` (also estimates c), and `4pl` (estimates both c and u). Lower models fix
+c=0 and u=1 as appropriate. All discriminations are positive, so higher ability
+increases success probability. The latent distribution is fixed N(0,1), which
+identifies scale and location; the Rasch option also fixes the slope scale.
+
+Estimation maximizes the Gauss–Hermite approximation to the marginal likelihood,
+using JAX derivatives and SciPy SLSQP. There are no item priors. This is not the
+probit EM/variational estimator exposed by `bin_irt`. Numerical bounds are
+a >= 1e-6, estimated c >= 1e-6, estimated u <= 1-1e-6, and u-c >= 1e-6.
+`starts` optionally supplies b, a, c and u only where those parameters are free;
+scalar starts broadcast, and 1PL accepts one shared slope. Defaults are b=0,
+a=1, c=0.1 and u=0.9. Each item needs an observed response; a fully missing
+subject receives the standard-normal prior as its posterior.
+
+`LogisticResult.means` contains a, b, c, u and EAP person scores x.
+`variances["x"]` is conditional posterior uncertainty given fitted items; it
+is not an item-parameter standard error and does not include calibration
+uncertainty. `log_likelihood` is the total marginal log likelihood. `trace`
+records this objective at initialization and optimizer callbacks. `converged`,
+`iterations` and `message` expose the optimizer termination status; check these
+before interpreting estimates. The tolerance applies to SLSQP's mean negative
+log-likelihood objective, not parameter correlation.
+
+`result.predict(theta)` returns conditional probabilities at supplied abilities;
+omitting theta uses fitted EAP scores. `result.probabilities` contains these EAP
+plug-in probabilities, not posterior-integrated predictive probabilities.
+`logistic_probabilities(theta, a=..., b=..., c=0, u=1)` exposes the pure JAX
+response function for JIT and differentiation, assuming valid parameter inputs.
+The fitting wrapper itself is not an end-to-end differentiable API.
+
+Increasing quadrature resolution and checking multiple starts is particularly
+important for 3PL/4PL: small samples and weak identification can yield extreme
+parameters or competing optima despite optimizer convergence. Run
+`uv run python examples/logistic.py` for a reproducible example of all variants.
