@@ -279,3 +279,58 @@ NaN in these low-level functions; the fitting interface requires zero padding.
 Use multiple starts and quadrature checks for weakly identified fits, particularly
 nested 3PL/4PL. See `uv run python examples/nominal.py` for a distractor-analysis
 example covering all five configurations with varying keys and category counts.
+
+## Noncompensatory binary models
+
+`noncompensatory_irt(responses, loading_mask=..., model="pc2pl", ...)` fits
+`pc1pl`, `pc2pl` or `pc3pl`. Responses are `(N,J)` binary observations with NaN
+missing. The required boolean `(J,D)` loading mask defines active dimensions;
+each row and column must have an active entry. Success is
+`c_j + (1-c_j) * product_h sigmoid(a_jh * theta_h + d_jh)` over active dimensions.
+A high ability in one dimension cannot remove a bottleneck in another.
+PC1PL fixes active slopes to one. PC2PL estimates positive active slopes.
+PC3PL additionally estimates item guessing probabilities in `[1e-6,1-1e-6]`.
+The other two models fix guessing to zero. Inactive slopes and intercepts are zero.
+
+The latent distribution is fixed to `N(0,I)`, fixing location and scale, and
+positive slopes fix direction. Use substantive mask anchors to label dimensions:
+identical mask columns leave permutation ambiguity. A valid mask alone does not
+prove statistical identification; each factor needs enough informative items.
+The model does not estimate latent correlations or allow negative active slopes.
+
+`starts` accepts `d` `(J,D)`, free `a` `(J,D)`, and `c` `(J,)` for PC3PL.
+Inactive entries must be zero. Controls are `quadrature_points=15`,
+`max_nodes=100000`, `max_iter=1000`, `tolerance=1e-10`, and `jit=True`.
+Tensor quadrature grows exponentially with D and rejects grids over `max_nodes`.
+No item priors are used. Response patterns are compressed before optimization.
+Enable JAX x64. Check `result.converged` and `result.message`.
+
+`NoncompensatoryResult.means` contains `a`, `d`, `c` and EAP `x` `(N,D)`;
+`covariances["x"]` is `(N,D,D)` and `variances["x"]` contains its diagonal.
+These are conditional on item estimates. All-missing subjects recover the
+quadrature prior; entirely missing items are rejected. `predict(theta)` accepts
+`(N,D)` abilities and `probabilities` predicts at EAP scores.
+`noncompensatory_probabilities` is a pure differentiable JAX kernel with the same
+mask and parameter conventions; callers supply valid shapes and restrictions.
+
+## Sequential ordered responses
+
+`sequential_irt(responses, category_counts=..., model="sequential", ...)` fits
+sequential logistic stages; `model="tutz"` fixes slopes to one. Responses are
+zero-based categories with NaN missing. Counts `(J,)` are explicit integers >=2,
+including unobserved categories; mixed counts are supported.
+
+Stage h succeeds with `q_h = sigmoid(a_j*(theta-b_jh))`. Category k means passing
+stages before k and failing stage k; the last category passes every stage.
+Stage difficulties need not be ordered. The sequential model estimates one
+positive slope per item shared by all stages; Tutz fixes it to one. Ability is
+fixed `N(0,1)` and there are no item priors. Binary items reduce to logistic 2PL
+or Rasch respectively. Products and failure probabilities use log arithmetic.
+
+`starts` accepts `steps` `(J,max(K)-1)` and, for sequential only, `a` `(J,)`.
+Unused padded steps are ignored. Controls match `polytomous_irt`, including
+`quadrature_points=41`. Returns `PolytomousResult` with item parameters, EAP `x`,
+conditional posterior variances and optimizer diagnostics. Predictions have shape
+`(N,J,max(K))` with zero probability for padding. `sequential_probabilities` is
+the corresponding pure JAX prediction function. The same two model names are
+also accepted by `polytomous_irt` and `polytomous_probabilities`.

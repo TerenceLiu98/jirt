@@ -448,3 +448,57 @@ uv run python examples/nominal.py
 
 Generated reports and R installation stay in ignored outputs/. R is not needed
 for routine tests. The reference repositories are unchanged.
+
+## Noncompensatory and sequential models
+
+Independent R mirt 1.48.5 (R 4.5.1) fits cover PC1PL, PC2PL, PC3PL,
+sequential and Tutz. PC cases use eight binary items: three pure indicators
+per factor and two items requiring both dimensions. Sequential cases use four
+items with 2/3/4/3 categories and unordered stage difficulties. Independent
+SciPy formulas generate rounded pattern frequencies (approximately 300,000
+subjects). These synthetic cases test matched calibration, not broad recovery.
+
+Both implementations fix abilities to N(0,I), with no item priors, and use the
+same Gauss–Hermite nodes and weights: 15 per dimension for the two-dimensional
+PC cases and 41 for sequential cases. Positive slope restrictions and guessing
+bounds match. PC parameters map directly to mirt a/d/g. Sequential difficulties
+map to -d/a, with unit a for Tutz. mirt uses EM/nlminb, no acceleration,
+TOL=1e-8 and up to 10,000 cycles; jirt uses SLSQP with mean-loss tolerance 1e-13.
+
+| Model | Maximum parameter difference | Maximum probability difference | Total log-likelihood difference |
+| --- | ---: | ---: | ---: |
+| PC1PL | 9.09e-6 | 1.69e-6 | 6.92e-8 |
+| PC2PL | 1.18e-4 | 2.19e-5 | 9.70e-7 |
+| PC3PL | 1.57e-3 | 6.07e-4 | 2.79e-5 |
+| Sequential | 2.07e-6 | 5.91e-7 | 1.54e-8 |
+| Tutz | 6.18e-7 | 9.21e-8 | 1.09e-8 |
+
+All fits converged. Probabilities are evaluated on a 3-by-3 grid at -3/0/3 for
+PC and 41 abilities in [-4,4] for sequential models. At identical R parameters,
+maximum probability error is 1.78e-15. Regression tests also compare marginal
+likelihood, EAP scores and posterior variances at fixed R parameters. Independent
+fits require converged likelihood at least as good as R within numerical
+tolerance; strict parameter parity is tested for PC1PL/sequential/Tutz. The
+remaining PC2PL/PC3PL fitting differences are retained above, not treated as
+parameter parity or evidence of global optimality.
+
+```sh
+uv run python scripts/prepare_response_reference.py
+Rscript --vanilla scripts/export_response_reference.R
+uv run python scripts/check_response_reference.py
+# After reviewing outputs/response-models/comparison.json:
+cp outputs/response-models/fixture.json tests/fixtures/response_mirt.json
+uv run pytest tests/test_noncompensatory.py tests/test_sequential.py tests/test_response_mirt.py
+uv run python examples/response_models.py
+```
+
+The R library is installed with `scripts/build_mirt_reference.sh`. Generated
+reports stay under ignored outputs/; reference repositories remain unchanged.
+
+Methods: Chalmers & Flora (2014), *Maximum-Likelihood Estimation of
+Noncompensatory IRT Models With the MH-RM Algorithm*,
+[doi:10.1177/0146621614520958](https://doi.org/10.1177/0146621614520958);
+Tutz (1990), *Sequential item response models with an ordered response*,
+[doi:10.1111/j.2044-8317.1990.tb00925.x](https://doi.org/10.1111/j.2044-8317.1990.tb00925.x).
+The PC response mechanism follows that literature; jirt uses quadrature MML,
+not the paper's MH-RM estimator.

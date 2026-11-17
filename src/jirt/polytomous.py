@@ -14,7 +14,17 @@ def _log_probabilities(theta, a, steps, category_counts, model):
     # Padding must not enter arithmetic, even when supplied as NaN.
     steps = jnp.where(valid_steps, steps, 0.0)
     z = a[None, :, None] * (theta[:, None, None] - steps[None, :, :])
-    if model == "grm":
+    if model in ("sequential", "tutz"):
+        passed = jnp.where(valid_steps[None, :, :], jax.nn.log_sigmoid(z), 0.0)
+        prefix = jnp.concatenate(
+            [jnp.zeros_like(z[:, :, :1]), jnp.cumsum(passed, axis=2)], axis=2
+        )
+        failed = jnp.concatenate(
+            [jax.nn.log_sigmoid(-z), jnp.zeros_like(z[:, :, :1])], axis=2
+        )
+        index = jnp.arange(prefix.shape[2])[None, None, :]
+        logp = prefix + jnp.where(index < counts[None, :, None] - 1, failed, 0.0)
+    elif model == "grm":
         first = jax.nn.log_sigmoid(-z[:, :, :1])
         last = jax.nn.log_sigmoid(z)
         # sigmoid(x)-sigmoid(y), x>y, evaluated without cancellation.
@@ -43,14 +53,15 @@ def polytomous_probabilities(theta, *, a, steps, category_counts, model="grm"):
     """Return (subjects, items, max_categories) probabilities, padded with zero.
 
     GRM steps are strictly increasing thresholds. GPCM steps are adjacent-category
-    difficulties and need not be ordered. PCM uses unit slopes; RSM additionally
+    difficulties and need not be ordered. Sequential/Tutz steps are successive
+    stage difficulties, also unordered; Tutz fixes slopes to one. PCM uses unit slopes; RSM additionally
     uses steps b_j + tau_k with shared centered tau. Supply those restrictions in
     the inputs when using this pure JAX prediction function. Categories start at
     zero. Inputs must have valid shapes, positive slopes and declared counts >=2.
     """
-    if model not in ("grm", "pcm", "gpcm", "rsm"):
+    if model not in ("grm", "pcm", "gpcm", "rsm", "sequential", "tutz"):
         raise ValueError("Unknown polytomous model")
-    if model in ("pcm", "rsm"):
+    if model in ("pcm", "rsm", "tutz"):
         a = jnp.ones_like(jnp.asarray(a))
     return jnp.exp(_log_probabilities(theta, a, steps, category_counts, model))
 
@@ -91,7 +102,7 @@ def _unpack(raw, design, counts, model):
     j = design.shape[0]
     n = design.shape[2]
     steps = jnp.einsum("jsk,k->js", design, raw[:n])
-    a = raw[n:] if model in ("grm", "gpcm") else jnp.ones(j)
+    a = raw[n:] if model in ("grm", "gpcm", "sequential") else jnp.ones(j)
     return a, steps
 
 
@@ -124,17 +135,18 @@ def polytomous_irt(
     tolerance=1e-10,
     jit=True,
 ):
-    """Fit GRM, PCM, GPCM or RSM with fixed N(0,1) ability and no item priors.
+    """Fit ordered logistic models with fixed N(0,1) ability and no item priors.
 
     Responses use integer categories 0..K_j-1 and NaN missing. Counts must be
     declared even for unobserved categories. RSM requires equal category counts
     and estimates steps b_j + tau_k with sum(tau)=0. PCM/RSM fix slopes to one;
-    GRM/GPCM estimate positive slopes. Only GRM requires increasing steps.
+    GRM/GPCM/sequential estimate positive slopes; Tutz fixes slopes to one.
+    Sequential/Tutz use successive stage decisions. Only GRM requires increasing steps.
     starts accepts padded steps (J,max(K)-1) and free slopes a (J,).
     """
     if not jax.config.x64_enabled:
         raise ValueError("Enable JAX x64 before fitting")
-    if model not in ("grm", "pcm", "gpcm", "rsm"):
+    if model not in ("grm", "pcm", "gpcm", "rsm", "sequential", "tutz"):
         raise ValueError("Unknown polytomous model")
     for v, name, minimum in (
         (quadrature_points, "quadrature_points", 3),
@@ -183,7 +195,9 @@ def polytomous_irt(
     for item, k in enumerate(counts - 1):
         initial_steps[item, :k] = np.linspace(-1, 1, k) if k > 1 else 0
     start = dict(starts or {})
-    if set(start) - ({"steps", "a"} if model in ("grm", "gpcm") else {"steps"}):
+    if set(start) - (
+        {"steps", "a"} if model in ("grm", "gpcm", "sequential") else {"steps"}
+    ):
         raise ValueError("Unexpected starts")
     steps = np.asarray(start.get("steps", initial_steps), dtype=float)
     mask = np.arange(smax)[None, :] < counts[:, None] - 1
@@ -196,7 +210,7 @@ def polytomous_irt(
         raise ValueError("RSM starts must have shared steps plus item locations")
     n = len(pars)
     lower = np.full(n, -np.inf)
-    if model in ("grm", "gpcm"):
+    if model in ("grm", "gpcm", "sequential"):
         a = np.asarray(start.get("a", np.ones(j)), dtype=float)
         if a.shape != (j,) or not np.isfinite(a).all() or np.any(a < 1e-6):
             raise ValueError("Invalid positive slope starts")
