@@ -334,3 +334,59 @@ conditional posterior variances and optimizer diagnostics. Predictions have shap
 `(N,J,max(K))` with zero probability for padding. `sequential_probabilities` is
 the corresponding pure JAX prediction function. The same two model names are
 also accepted by `polytomous_irt` and `polytomous_probabilities`.
+
+## Generalized graded unfolding model
+
+`ggum_irt(responses, category_counts=..., starts=..., anchor_item=0, ...)`
+fits unidimensional GGUM for binary or ordered polytomous items. Responses are
+`(N,J)` integer categories `0..K_j-1`, where larger categories mean stronger
+agreement, and NaN means missing. Declare counts `(J,)` explicitly, including
+unobserved categories. Items may have different category counts.
+
+Let `z = a_j*(theta-delta_j)` and `S_k = sum(tau_jh, h=1..k)`, with `S_0=0`.
+Category weights are `exp(a_j*S_k)*cosh((K_j-1/2-k)*z)`, normalized across
+`k=0..K_j-1`. This is the paired-exponential GGUM formula with a common factor
+removed. Implementation uses log-add-exp and log-softmax, remains smooth at
+`theta=delta_j`, and avoids exponential overflow at large distances. For binary
+items the same formula applies with `K_j=2`. Expected agreement is highest at
+the item location and falls as distance increases in either direction.
+
+Parameters and constraints:
+
+- `a` `(J,)`: positive discriminations, bounded below by `1e-6`.
+- `delta` `(J,)`: item ideal locations. `delta[anchor_item] >= 1e-6` fixes the
+  otherwise arbitrary reflection of the entire scale. Choose an item known to
+  lie on its positive side; other locations are unrestricted.
+- `tau` `(J,max(K)-1)`: positive, strictly decreasing distance thresholds,
+  `tau_1 > ... > tau_(K-1) > 0`, with minimum gap/value `1e-6`. This uses mirt's
+  `t` sign convention: negate these to obtain the original GGUM lower-side
+  thresholds, whose upper-side counterparts are symmetric. Unused padding is
+  ignored on input and zero on output.
+
+`starts` requires all three arrays. Ability is fixed to `N(0,1)`, identifying
+location and scale; no item priors are used. A reporting transformation
+`theta' = shift + sign*scale*theta` maps `delta` the same way, divides `a` by
+positive `scale`, and multiplies `tau` by `scale`. `sign` is either +1 or -1.
+Response probabilities are invariant under this transformation. An anchor fixes
+direction, but does not guarantee identification for an uninformative design.
+Use items spanning the attitude range. The likelihood is nonconvex: try several
+substantively reasonable starting locations and compare converged likelihoods.
+The API requires explicit starts instead of inferring an item ordering.
+
+Controls are `quadrature_points=61`, `max_iter=2000`, `tolerance=1e-10` and
+`jit=True`. Enable JAX x64. Fitting uses compressed response patterns,
+Gauss–Hermite marginal maximum likelihood and SLSQP with JAX derivatives.
+`tolerance` applies to the mean negative log likelihood. Check
+`result.converged`/`message`; convergence alone does not establish a global
+optimum. Increase quadrature density when discriminations or distant locations
+make the integrand narrow.
+
+`GGUMResult.means` contains `a`, `delta`, `tau` and EAP person locations `x`.
+`variances["x"]` is the conditional posterior variance, excluding item estimation
+uncertainty. Unfolding posteriors can be bimodal, so EAP alone may not describe a
+person well. All-missing persons recover the quadrature prior; entirely missing
+items are rejected. `predict(theta)` and `probabilities` return
+`(N,J,max(K))` category probabilities with zero padding, the latter evaluated
+at EAP scores. `ggum_probabilities` is a differentiable pure JAX function with
+the same parameter conventions; callers provide valid shapes and restrictions.
+See `examples/unfolding.py` for synthetic attitude responses and two-start fitting.

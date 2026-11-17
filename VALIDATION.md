@@ -502,3 +502,56 @@ Tutz (1990), *Sequential item response models with an ordered response*,
 [doi:10.1111/j.2044-8317.1990.tb00925.x](https://doi.org/10.1111/j.2044-8317.1990.tb00925.x).
 The PC response mechanism follows that literature; jirt uses quadrature MML,
 not the paper's MH-RM estimator.
+
+## GGUM unfolding models
+
+Independent R mirt 1.48.5 (R 4.5.1) fits cover six binary items and five mixed
+items with 2/3/4/3/3 categories. Independent NumPy paired-exponential formulas
+generate deterministic rounded frequencies (approximately 500,000 persons).
+Both packages use fixed N(0,1), 61-point Gauss–Hermite nodes/weights, positive
+discriminations, positive first-item location, no item priors, and identical
+perturbed starting values. The parameter mapping is `a=a1`, `delta=b1`, `tau=t`.
+
+jirt enforces positive decreasing thresholds. mirt uses positive bounds but
+has no corresponding order constraint in this comparison; the export script
+requires strictly ordered interior R estimates before accepting the reference.
+Thus both fitted solutions satisfy the same restrictions. R uses EM/nlminb,
+TOL=1e-9, no acceleration and up to 10,000 cycles; jirt uses SLSQP with mean-loss
+tolerance 1e-13. All four fits converged.
+
+| Case | Maximum parameter difference | Maximum probability difference | Total log-likelihood difference |
+| --- | ---: | ---: | ---: |
+| Binary GGUM | 4.39e-5 | 2.73e-5 | 4.03e-7 |
+| Mixed-category GGUM | 3.54e-6 | 2.59e-6 | 1.96e-8 |
+
+Probability comparisons use 41 points in [-4,4]. At identical R parameters,
+maximum probability error is 3.00e-15. Regression tests check fixed-parameter
+likelihood, EAP and posterior variance as well as independent parameter fits.
+Other tests cover expected-score proximity, binary responses, mixed-category
+normalization/padding, extreme-distance stability, a smooth gradient at the
+ideal point, partial/all-missing persons, and reflection/location/scale
+invariance. Synthetic frequency-table recovery checks binary and polytomous
+item parameters on the identified metric (absolute tolerance 0.015).
+
+These cases use informative starts near the generating parameters. They verify
+matched numerical calibration and local recovery, not convergence from arbitrary
+starts or global optimality. The reproducible attitude example uses two different
+starting location scales; both converge to the same likelihood in that sample.
+
+```sh
+sh scripts/build_mirt_reference.sh
+uv run python scripts/prepare_ggum_reference.py
+Rscript --vanilla scripts/export_ggum_reference.R
+uv run python scripts/check_ggum_reference.py
+# After reviewing outputs/ggum/comparison.json:
+cp outputs/ggum/fixture.json tests/fixtures/ggum_mirt.json
+uv run pytest tests/test_unfolding.py tests/test_ggum_mirt.py
+uv run python examples/unfolding.py
+```
+
+Generated reports remain under ignored outputs/ggum/; R is not needed for routine
+regression tests and reference source trees are unchanged.
+
+Roberts, Donoghue & Laughlin (2000), *A General Item Response Theory Model for
+Unfolding Unidimensional Polytomous Responses*, Applied Psychological Measurement
+24, 3–32, [doi:10.1177/01466216000241001](https://doi.org/10.1177/01466216000241001).

@@ -26,6 +26,7 @@ from .ordinal import ord_irt
 from .poisson import pois_irt
 from .polytomous import PolytomousResult, polytomous_irt, polytomous_probabilities
 from .sequential import sequential_irt, sequential_probabilities
+from .unfolding import GGUMResult, ggum_irt, ggum_probabilities
 from .utilities import convert_votes, get_starts, make_priors, network_starts
 
 __version__ = "0.1.0"
@@ -58,6 +59,9 @@ __all__ = [
     "polytomous_probabilities",
     "sequential_irt",
     "sequential_probabilities",
+    "GGUMResult",
+    "ggum_irt",
+    "ggum_probabilities",
     "convert_votes",
     "get_starts",
     "make_priors",

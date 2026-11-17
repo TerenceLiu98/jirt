@@ -44,6 +44,7 @@ print(result.means["x"], result.converged)
 
 | Function | Formulas | Input | Main parameters |
 | --- | --- | --- | --- |
+| `ggum_irt` | $P(Y_{ij}=k)\propto e^{a_j\sum_{h=1}^k\tau_{jh}}\cosh((K_j-\frac12-k)a_j(\theta_i-\delta_j))$ | Binary or ordered 0-based categories; NaN missing; declared counts and starts | `a`, ideal locations `delta`, thresholds `tau`, EAP `x` |
 | `noncompensatory_irt` | $P(Y_{ij}=1)=c_j+(1-c_j)\prod_{h\in A_j}\mathrm{sigmoid}(a_{jh}\theta_{ih}+d_{jh})$ | Binary responses; NaN missing; explicit loading mask | `a`, `d`, `c`, EAP `x`; PC1PL, PC2PL or PC3PL |
 | `sequential_irt` | $P(Y_{ij}=k)=(1-q_{jk})\prod_{h<k}q_{jh}$, $q_{jh}=\mathrm{sigmoid}(a_j(\theta_i-b_{jh}))$; final category passes every stage | 0-based ordered categories; NaN missing; declared category counts | `a`, `steps`, EAP `x`; sequential or unit-slope Tutz |
 | `nominal_irt` | Nominal: $P(Y_{ij}=k)=\mathrm{softmax}_k(s_{jk}\theta_i+t_{jk})$; nested: key probability $q_j$, distractor mass $1-q_j$ | Unordered 0-based categories; NaN missing; counts and optional answer keys | `slopes`, `intercepts`, EAP `x`; nested `a`, `b`, `c`, `u` |
@@ -95,6 +96,10 @@ distribution. Run `uv run python examples/multidimensional.py` for examples.
 `sequential_irt` models ordered responses as successive stage decisions. Run
 `uv run python examples/response_models.py` for both mechanisms.
 
+`ggum_irt` models agreement peaking near an item’s ideal location. Run
+`uv run python examples/unfolding.py` for an attitude-response example with
+multiple starting values.
+
 See [API.md](API.md) for parameter shapes and identification constraints.
 
 ## TODO
@@ -104,7 +109,7 @@ See [API.md](API.md) for parameter shapes and identification constraints.
 - [x] General polytomous IRT: graded response, partial credit and rating scale models.
 - [x] Nominal and nested response models.
 - [x] Noncompensatory and sequential response models.
-- [ ] Unfolding models, including GGUM.
+- [x] Unfolding models: unidimensional GGUM for binary and polytomous responses.
 - [ ] Multiple-group and mixture IRT, including zero-inflated response models.
 - [ ] Cognitive diagnosis models, including DINA and DINO.
 - [ ] Amortized IRT using item content.
