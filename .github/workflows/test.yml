@@ -40,4 +40,5 @@ jobs:
       - run: uv run python examples/nominal.py
       - run: uv run python examples/response_models.py
       - run: uv run python examples/unfolding.py
+      - run: uv run python examples/groups.py
       - run: uv build

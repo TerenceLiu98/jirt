@@ -44,6 +44,8 @@ print(result.means["x"], result.converged)
 
 | Function | Formulas | Input | Main parameters |
 | --- | --- | --- | --- |
+| `group_irt` | $P(Y_{ij}\ge k\mid g_i)=\mathrm{sigmoid}(a_{g_i j}(\theta_i-b_{g_i jk}))$; $\theta_i\mid g_i\sim N(\mu_{g_i},\sigma_{g_i}^2)$ | Binary or ordered categories; NaN missing; observed group labels and sharing masks | Group `a`, `steps`, `mu`, `sigma`, EAP `x`; Rasch, 2PL or GRM |
+| `mixture_irt` | $P(\mathbf y_i)=\sum_c\pi_c P_c(\mathbf y_i)$; optional structural component $P_0(\mathbf y_i)=\mathbf1[\text{all observed responses}=0]$ | Binary or ordered categories; NaN missing; class count and starts | Class parameters, weights, posterior memberships; optional zero inflation |
 | `ggum_irt` | $P(Y_{ij}=k)\propto e^{a_j\sum_{h=1}^k\tau_{jh}}\cosh((K_j-\frac12-k)a_j(\theta_i-\delta_j))$ | Binary or ordered 0-based categories; NaN missing; declared counts and starts | `a`, ideal locations `delta`, thresholds `tau`, EAP `x` |
 | `noncompensatory_irt` | $P(Y_{ij}=1)=c_j+(1-c_j)\prod_{h\in A_j}\mathrm{sigmoid}(a_{jh}\theta_{ih}+d_{jh})$ | Binary responses; NaN missing; explicit loading mask | `a`, `d`, `c`, EAP `x`; PC1PL, PC2PL or PC3PL |
 | `sequential_irt` | $P(Y_{ij}=k)=(1-q_{jk})\prod_{h<k}q_{jh}$, $q_{jh}=\mathrm{sigmoid}(a_j(\theta_i-b_{jh}))$; final category passes every stage | 0-based ordered categories; NaN missing; declared category counts | `a`, `steps`, EAP `x`; sequential or unit-slope Tutz |
@@ -100,6 +102,11 @@ distribution. Run `uv run python examples/multidimensional.py` for examples.
 `uv run python examples/unfolding.py` for an attitude-response example with
 multiple starting values.
 
+`group_irt` fits known populations; `mixture_irt` infers latent classes and
+optionally a structural all-lowest-response class. Run
+`uv run python examples/groups.py` for shared anchors, multiple starts and
+zero inflation.
+
 See [API.md](API.md) for parameter shapes and identification constraints.
 
 ## TODO
@@ -110,6 +117,6 @@ See [API.md](API.md) for parameter shapes and identification constraints.
 - [x] Nominal and nested response models.
 - [x] Noncompensatory and sequential response models.
 - [x] Unfolding models: unidimensional GGUM for binary and polytomous responses.
-- [ ] Multiple-group and mixture IRT, including zero-inflated response models.
+- [x] Multiple-group and mixture IRT, including zero-inflated binary/graded responses.
 - [ ] Cognitive diagnosis models, including DINA and DINO.
 - [ ] Amortized IRT using item content.

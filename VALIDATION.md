@@ -555,3 +555,78 @@ regression tests and reference source trees are unchanged.
 Roberts, Donoghue & Laughlin (2000), *A General Item Response Theory Model for
 Unfolding Unidimensional Polytomous Responses*, Applied Psychological Measurement
 24, 3–32, [doi:10.1177/01466216000241001](https://doi.org/10.1177/01466216000241001).
+
+## Observed groups, latent mixtures and structural zeros
+
+Six independent R mirt 1.48.5 (R 4.5.1) comparisons cover observed groups,
+ordinary mixtures and zero-inflated mixtures, each with binary 2PL and GRM
+responses. Binary cases have eight items; graded cases have five three-category
+items. Independent SciPy response formulas generate rounded frequencies of
+approximately 300,000 per observed group or 300,000 per mixture sample.
+
+Known-group cases share the first two anchor items, free remaining item
+parameters and estimate the second group's mean/SD. Ordinary mixtures estimate
+two class-specific item profiles under fixed N(0,1), plus class weights.
+Zero-inflated cases estimate one regular N(0,1) component and a structural class.
+JAX and R both fit two distinct starts for every latent mixture. Regression tests
+also reverse the second start's regular class labels and align estimated profiles
+with a minimum-cost assignment before comparing parameters and recovery.
+
+| Configuration | Maximum parameter difference | Maximum weight difference | Total log-likelihood difference |
+| --- | ---: | ---: | ---: |
+| Observed-group 2PL | 9.73e-6 | — | 1.46e-7 |
+| Observed-group GRM | 7.37e-6 | — | 1.52e-7 |
+| Two-class 2PL | 6.68e-5 | 6.48e-6 | 1.34e-6 |
+| Two-class GRM | 7.50e-5 | 7.04e-7 | 1.66e-6 |
+| Zero-inflated 2PL | 6.12e-7 | 5.97e-9 | 9.08e-9 |
+| Zero-inflated GRM | 5.28e-7 | 1.85e-8 | 2.79e-9 |
+
+Parameters include slopes, thresholds and latent means/SDs where estimated.
+At identical R parameters, conditional response probabilities agree within
+2.3e-15, EAP/variance within 7.2e-15 and class memberships within 3.0e-15.
+R curves and EAP moments come from `probtrace`/`fscores`; reference memberships
+are independently computed in R from `probtrace` pattern products, quadrature
+and the fitted mirt class weights. They are not an export of `fscores(classify)`.
+Tests additionally check single-group/class reductions to ordinary Rasch/2PL/GRM,
+exact zero-weight prediction limits, structural/missing distinctions, category
+normalization and label-invariant recovery of synthetic parameters.
+
+jirt uses 61-point Gauss–Hermite quadrature with nodes transformed by component
+mean/SD and SLSQP mean-loss tolerance 1e-13. R uses EM/nlminb, TOL=1e-9, no
+acceleration and up to 10,000 cycles. All starts converged. Ordinary mixtures
+share the exact GH nodes/weights. For estimated group distributions, mirt uses
+a uniform [-10,10] grid with spacing 0.1; the fixed-parameter likelihood check
+verifies that its integration difference is below 1e-6 for these cases.
+
+For zero inflation, the R reference follows mirt's documented construction: a
+fixed class with mean -100, variance 1e-5, unit slopes and fixed intercepts,
+using a grid containing -100 plus the uniform regular grid. This approximates
+structural zeros to floating-point precision; jirt uses an exact deterministic
+component. The comparison's reference memberships use the exact structural
+pattern probability. No extreme person score is used by jirt. Intercepts map
+to thresholds via `steps=-d/a`; variance maps to `sigma=sqrt(COV_11)`. R PI
+parameters are converted from reference logits to normalized class weights.
+
+These informative synthetic cases establish matched numerical calibration and
+local recovery, not general identifiability or global optimality for mixtures.
+Item recovery is checked within 0.003 and class weights within 0.001 of the
+unrounded generating parameters. No item priors are used.
+
+```sh
+sh scripts/build_mirt_reference.sh
+uv run python scripts/prepare_group_reference.py
+uv run python scripts/fit_group_reference.py
+Rscript --vanilla scripts/export_group_reference.R
+uv run python scripts/check_group_reference.py
+# After reviewing outputs/groups/comparison.json:
+cp outputs/groups/fixture.json tests/fixtures/groups_mirt.json
+uv run pytest tests/test_groups.py tests/test_groups_mirt.py
+uv run python examples/groups.py
+```
+
+Generated reports remain ignored under outputs/groups/. The R regression fixture
+allows routine tests without R; reference source trees remain unchanged.
+
+References: Chalmers (2012), [doi:10.18637/jss.v048.i06](https://doi.org/10.18637/jss.v048.i06);
+Rost (1990), [doi:10.1177/014662169001400305](https://doi.org/10.1177/014662169001400305);
+Wall, Park & Moustaki (2015), [doi:10.1177/0146621615588184](https://doi.org/10.1177/0146621615588184).
