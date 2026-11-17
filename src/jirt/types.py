@@ -9,6 +9,13 @@ from typing import Any, TypedDict
 ArrayLike = Any
 
 
+class MultidimensionalStarts(TypedDict, total=False):
+    """Optional item-by-factor loadings a and per-item intercepts d."""
+
+    a: ArrayLike
+    d: ArrayLike
+
+
 class LogisticStarts(TypedDict, total=False):
     """Optional free item parameters; only keys estimated by the model are valid."""
 

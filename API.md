@@ -102,3 +102,79 @@ Increasing quadrature resolution and checking multiple starts is particularly
 important for 3PL/4PL: small samples and weak identification can yield extreme
 parameters or competing optima despite optimizer convergence. Run
 `uv run python examples/logistic.py` for a reproducible example of all variants.
+
+## Multidimensional 2PL, bifactor and testlet models
+
+`multidimensional_irt(responses, dimensions=2, loading_mask=None,
+structure="multidimensional", groups=None, anchors=None, starts=None,
+quadrature_points=15, max_nodes=100000, max_iter=1000, tolerance=1e-10,
+jit=True)` fits `sigmoid(theta @ a.T + d)` to 0/1 responses, with NaN missing.
+Enable JAX x64 before fitting. `a` has shape `(items, dimensions)` and `d`
+contains item intercepts; there is no unique scalar item difficulty in multiple
+dimensions. Negative non-anchor loadings are permitted. No item priors are used.
+
+All latent factors have fixed mean zero and covariance identity. This fixes
+location and scale and assumes orthogonal factors; this release does not estimate
+factor correlations. Factor signs and rotations require additional restrictions:
+
+- For `structure="multidimensional"` without a mask, the first D items form a
+  lower-triangular loading block with positive diagonal. This chooses an
+  exploratory orientation when that block has full rank. Choose suitable anchor
+  items by ordering the columns of the response matrix. The latent factors can
+  be relabelled/rotated for interpretation after fitting, provided loadings and
+  abilities are transformed together.
+- A boolean `loading_mask` of shape `(items,D)` fixes every false entry to exactly
+  zero. This supports confirmatory designs. `anchors` optionally specifies one
+  item index per factor whose allowed loading must be at least 1e-6; otherwise
+  the first allowed item is used. Signs alone do not remove arbitrary rotations:
+  the supplied zero pattern must identify the intended orientation. An all-true
+  mask is not an identified confirmatory model. The implementation checks shapes
+  and nonempty factors, not generic/local identifiability of every possible mask.
+- For `structure="bifactor"`, supply `groups`, an integer vector of item length.
+  Contiguous IDs 0,1,... assign items to specific factors; -1 means general-only.
+  Dimension is inferred as `1 + number of groups`. Every item loads on the general
+  factor and at most one orthogonal specific factor. Allowed loadings are free
+  per item. Each group requires at least three items, but this count alone is not
+  sufficient for identification. Pure general items can anchor the general /
+  specific decomposition, particularly for designs with only two groups.
+- `structure="testlet"` uses the same mask but constrains specific loadings within
+  each group to a shared nonnegative scale `tau_g`. With a standard-normal specific
+  factor this is a common additive logit effect `t_ig ~ N(0,tau_g**2)`, whose item
+  coefficients are one. `means["testlet_variance"]` returns these variances.
+  Testlet is therefore a constrained bifactor model, not the subject-group
+  regression implemented in `hier_irt`. This is an additive random-intercept
+  convention; formulations that multiply testlet effects by item discrimination
+  use different constraints. Zero specific scale removes that testlet effect.
+
+`starts` accepts `a` `(J,D)` and `d` `(J,)`, also described by
+`jirt.types.MultidimensionalStarts`. Default intercepts are zero, allowed
+first-factor loadings are one and other allowed loadings are 0.5. Starts must
+respect structural zeros, anchor signs and testlet equality constraints. Use
+positive testlet starts: at exactly zero the variance-scale derivative is zero,
+which can prevent a gradient optimizer from moving away from that boundary.
+
+Estimation uses tensor Gauss–Hermite quadrature and SLSQP with JAX derivatives.
+`quadrature_points` is **per factor**, so total nodes grow as `points**D`.
+`max_nodes` rejects a grid above that limit before allocation. This is a
+low-dimensional implementation, not Cai's dimension-reduction algorithm; high
+factor counts require a different integration strategy. Response patterns are
+aggregated, including their missingness pattern, before posterior evaluation.
+Memory also scales with distinct patterns times nodes and factor count; the
+node limit alone is not a memory guarantee. Increase quadrature resolution and
+compare multiple starts when assessing a fit. Finite tensor quadrature is only
+approximately rotation invariant; rotate results for interpretation, not as a
+claim that arbitrary rotations preserve the finite-grid likelihood exactly.
+
+`MultidimensionalResult.means` contains `a`, `d` and EAP scores `x` `(N,D)`.
+`covariances["x"]` contains full conditional posterior covariance matrices
+`(N,D,D)`; `variances["x"]` gives their diagonals. These exclude item-calibration
+uncertainty. A completely missing subject receives the N(0,I) prior. Items with
+no observed responses are rejected. `predict(theta)` accepts `(N,D)` abilities;
+without theta it evaluates EAP plug-in probabilities, as does `probabilities`.
+`multidimensional_probabilities(theta, a=..., d=...)` is a pure JAX function
+supporting JIT and autodifferentiation; fitting is not end-to-end differentiable.
+
+`log_likelihood`, `trace`, `converged`, `iterations` and `message` describe the
+optimization. `tolerance` controls mean-loss SLSQP stopping precision. Reaching
+the iteration limit returns a result with `converged=False`. See
+`uv run python examples/multidimensional.py` for all three structures.

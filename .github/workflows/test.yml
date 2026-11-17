@@ -35,4 +35,5 @@ jobs:
       - run: uv run pytest
       - run: uv run python examples/all_models.py
       - run: uv run python examples/logistic.py
+      - run: uv run python examples/multidimensional.py
       - run: uv build

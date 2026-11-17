@@ -266,3 +266,80 @@ uv run python scripts/compare_logistic_packages.py check
 Exports, full per-start comparisons, gradients, Hessian eigenvalues and R fit
 objects remain in ignored `outputs/logistic-mirt/`. No R dependency is added to
 the Python package, and the existing mirt regression fixture is unchanged.
+
+## Multidimensional logistic calibration
+
+Issue #2 is covered by `multidimensional_irt`: exploratory/confirmatory
+compensatory 2PL, orthogonal bifactor models and testlet random intercepts.
+`tests/test_multidimensional.py` checks the one-dimensional reduction to
+`logistic_irt`, structural zero loadings, shared testlet scales, zero-testlet
+probability reduction, JIT/eager agreement, fully and partially missing responses,
+invalid specifications, and parameter recovery. Exploratory recovery is compared
+after orthogonal Procrustes alignment to a rotated generating loading matrix.
+Structured recovery uses three general-only items to anchor the general factor
+alongside two three-item groups; the earlier six-item bifactor design was too
+weakly identified for a reliable parameter-recovery assertion.
+
+`tests/test_multidimensional_mirt.py` adds eight regressions using R mirt 1.48.5
+from reference commit `211851adae7a6bee580af830d37187f0e81a5ca8`, with R 4.5.1.
+Four independent calibrations start from neutral loadings and zero intercepts;
+four additional tests compare the probability, likelihood and EAP scoring kernels
+at the R-exported item parameters. Data consist of deterministic rounded
+response-pattern frequencies, approximately 200,000 subjects per case: six items
+for the two-dimensional cases and nine items for bifactor/testlet (three factors).
+These are numerical cross-software checks, not a broad empirical recovery study.
+
+Both estimators fix latent means to zero, covariance to identity, item priors to
+none, and use the same tensor product of 15 Gauss–Hermite nodes per factor.
+Masks, positive anchor loadings, and within-testlet equality constraints match.
+The exploratory case uses a lower-triangular anchor block; signed non-anchor
+loadings remain free. R uses EM with Newton–Raphson M-steps, no acceleration and
+outer tolerance 1e-8; jirt uses SLSQP with mean-loss tolerance 1e-13. All four
+fits converged. Maximum absolute differences were:
+
+| Specification | Loadings a | Intercepts d | Conditional probabilities | Total log likelihood |
+| --- | ---: | ---: | ---: | ---: |
+| Confirmatory 2D | 4.47e-7 | 1.51e-7 | 1.83e-7 | 4.19e-9 |
+| Exploratory 2D, anchored | 4.19e-7 | 1.03e-7 | 1.67e-7 | 1.86e-9 |
+| Bifactor | 6.70e-7 | 3.92e-7 | 2.17e-7 | 1.37e-8 |
+| Testlet | 1.38e-6 | 3.76e-7 | 5.42e-7 | 4.35e-8 |
+
+Predictions use 31 reproducibly sampled latent vectors per case. At identical
+R parameters, maximum probability error is 2.0e-15, EAP error 9.2e-15, posterior
+variance error 6.0e-15 and total likelihood error 3.3e-9. mirt automatically
+classifies the triangular model as exploratory and normally rotates EAP scores.
+The exporter disables that automatic rotation on a scoring copy of the fitted
+object, preserving the explicitly anchored coordinates. This changes only the
+scoring configuration, not the fitted parameters or reference package source.
+
+For bifactor and testlet, a separate `bfactor` object with fixed JAX item
+parameters checks conditional probabilities, with maximum difference 5.6e-16.
+This is a check of the specialized engine's response model, **not an independent
+bfactor calibration comparison**; the independent structured fits above use the
+full-dimensional `mirt` engine and exactly matched tensor quadrature.
+
+The implementation uses full tensor quadrature, not Cai's two-tier integration
+reduction. Computational cost grows exponentially in factor count; no large-
+dimensional performance claim is made. The present covariance convention is
+orthogonal N(0,I), and masks are not automatically certified identifiable.
+See `API.md` for scale, sign, rotation and testlet identification conventions.
+
+Reproduce from the repository root (the optional R library stays in outputs):
+
+```sh
+sh scripts/build_mirt_reference.sh
+uv run python scripts/prepare_multidimensional_reference.py
+Rscript --vanilla scripts/export_multidimensional_reference.R
+uv run python scripts/check_multidimensional_reference.py
+# After reviewing the comparison:
+cp outputs/multidimensional/fixture.json tests/fixtures/multidimensional_mirt.json
+uv run pytest tests/test_multidimensional.py tests/test_multidimensional_mirt.py
+uv run python examples/multidimensional.py
+```
+
+The checker verifies fixed-parameter probabilities, likelihood and posterior
+moments, reports independent-fit differences, and prepares a compact fixture.
+The regression tests enforce independent-fit agreement as well. Generated
+reports remain ignored under `outputs/multidimensional/`; R is unnecessary for
+routine Python regression tests. The structured example uses 3,000 simulated
+subjects, nine items, and partial missingness; all three specifications converge.
