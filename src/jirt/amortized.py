@@ -7,6 +7,8 @@ import numpy as np
 from numpy.polynomial.hermite import hermgauss
 from scipy.optimize import minimize
 from jax.flatten_util import ravel_pytree
+from jax.scipy.optimize import minimize as jax_minimize
+from functools import partial
 
 
 def _encode(params, features):
@@ -23,6 +25,37 @@ def _posterior(difficulty, patterns, nodes, lw):
         + lw
     )
     return jax.scipy.special.logsumexp(joint, axis=1), jax.nn.softmax(joint, axis=1)
+
+
+def _unpack(raw, layout):
+    params = {}
+    offset = 0
+    for name, shape in layout:
+        size = int(np.prod(shape))
+        params[name] = raw[offset : offset + size].reshape(shape)
+        offset += size
+    return params
+
+
+def _loss(raw, data, layout):
+    features, patterns, freq, nodes, lw, l2 = data
+    params = _unpack(raw, layout)
+    ll, _ = _posterior(_encode(params, features), patterns, nodes, lw)
+    penalty = sum(jnp.sum(v * v) for k, v in params.items() if "bias" not in k)
+    return -(ll @ freq) / freq.sum() + 0.5 * l2 * penalty
+
+
+_value_grad = jax.jit(jax.value_and_grad(_loss), static_argnames=("layout",))
+
+
+@partial(jax.jit, static_argnames=("layout", "max_iter"))
+def _fit_bfgs(raw, data, layout, max_iter, tolerance):
+    return jax_minimize(
+        lambda x: _loss(x, data, layout),
+        raw,
+        method="BFGS",
+        options=dict(maxiter=max_iter, gtol=tolerance),
+    )
 
 
 @dataclass
@@ -74,6 +107,7 @@ def amortized_irt(
     max_iter=1000,
     tolerance=1e-10,
     jit=True,
+    optimizer="scipy",
 ):
     """Fit a shared content encoder by regularized normal-marginal 1PL MLE.
 
@@ -85,7 +119,11 @@ def amortized_irt(
     hidden_size>0 uses one tanh hidden layer; zero uses an affine encoder.
     Unit discrimination and fixed N(0,1) person distribution identify the scale.
     No item-specific offsets or variational posteriors are used. key controls
-    initialization; optimization is deterministic full-batch L-BFGS-B. The loss
+    initialization. optimizer="scipy" uses full-batch L-BFGS-B; "jax" uses
+    device-side BFGS with a gradient-infinity-norm stopping tolerance. The JAX
+    path requires jit=True and records only initial/final objectives in trace.
+    It reports line-search failure and iteration exhaustion as nonconvergence.
+    The loss
     is mean negative person marginal log likelihood plus l2/2 times the sum of
     squared encoder weights (biases excluded). Explicit key is always required.
     """
@@ -112,6 +150,8 @@ def amortized_irt(
             raise ValueError(f"Invalid {name}")
     if not isinstance(jit, bool):
         raise ValueError("jit must be boolean")
+    if optimizer not in ("scipy", "jax") or (optimizer == "jax" and not jit):
+        raise ValueError("optimizer must be scipy or jax; jax requires jit=True")
     # Validate typed and legacy JAX keys before doing any optimization work.
     try:
         k1, k2 = jax.random.split(key)
@@ -164,7 +204,8 @@ def amortized_irt(
             output=0.01 * jax.random.normal(k1, (F,), dtype=jnp.float64),
             bias=jnp.array(0.0),
         )
-    raw, unravel = ravel_pytree(params)
+    raw, _ = ravel_pytree(params)
+    layout = tuple((name, tuple(params[name].shape)) for name in sorted(params))
     patterns, inverse, freq = np.unique(
         np.where(np.isnan(y), -1, y).astype(int),
         axis=0,
@@ -177,33 +218,39 @@ def amortized_irt(
     nodes = jnp.asarray(nodes * np.sqrt(2))
     lw = jnp.asarray(np.log(w) - 0.5 * np.log(np.pi))
 
-    def loss(raw):
-        p = unravel(raw)
-        b = _encode(p, features)
-        ll, _ = _posterior(b, patterns, nodes, lw)
-        penalty = sum(jnp.sum(v * v) for k, v in p.items() if "bias" not in k)
-        return -(ll @ freq) / freq.sum() + 0.5 * l2 * penalty
-
-    evaluate = jax.value_and_grad(loss)
-    if jit:
-        evaluate = jax.jit(evaluate)
+    data = (features, patterns, freq, nodes, lw, jnp.asarray(l2))
+    evaluate = _value_grad if jit else jax.value_and_grad(_loss)
 
     def objective(raw):
-        value, grad = evaluate(jnp.asarray(raw))
+        value, grad = evaluate(jnp.asarray(raw), data, layout)
         if not np.isfinite(value) or not np.isfinite(grad).all():
             raise FloatingPointError("Nonfinite amortized objective")
         return float(value), np.asarray(grad)
 
     trace = [objective(raw)[0]]
-    opt = minimize(
-        objective,
-        np.asarray(raw),
-        jac=True,
-        method="L-BFGS-B",
-        callback=lambda r: trace.append(objective(r)[0]),
-        options=dict(maxiter=max_iter, ftol=tolerance, gtol=tolerance),
-    )
-    params = unravel(jnp.asarray(opt.x))
+    if optimizer == "jax":
+        opt = _fit_bfgs(raw, data, layout, max_iter, jnp.asarray(tolerance))
+        if not np.isfinite(opt.fun) or not np.isfinite(opt.x).all():
+            raise FloatingPointError("Nonfinite amortized optimization result")
+        trace.append(float(opt.fun))
+        message = {
+            0: "Converged (gradient norm)",
+            1: "Iteration limit reached",
+            3: "Line search zoom failed",
+            4: "Line search failed (saddle point)",
+            5: "Line search iteration limit reached",
+        }.get(int(opt.status), f"BFGS status {int(opt.status)}")
+    else:
+        opt = minimize(
+            objective,
+            np.asarray(raw),
+            jac=True,
+            method="L-BFGS-B",
+            callback=lambda r: trace.append(objective(r)[0]),
+            options=dict(maxiter=max_iter, ftol=tolerance, gtol=tolerance),
+        )
+        message = str(opt.message)
+    params = _unpack(jnp.asarray(opt.x), layout)
     b = _encode(params, features)
     ll, post = _posterior(b, patterns, nodes, lw)
     ability = post @ nodes
@@ -221,5 +268,5 @@ def amortized_irt(
         float(ll @ freq),
         float(opt.fun),
         np.asarray(trace),
-        str(opt.message),
+        message,
     )

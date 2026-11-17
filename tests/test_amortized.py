@@ -121,3 +121,56 @@ def test_affine_matches_independent_scipy_objective():
     np.testing.assert_allclose(
         fit.difficulty, z @ opt.x[:-1] + opt.x[-1], atol=2e-5, rtol=0
     )
+
+
+@pytest.mark.parametrize("hidden", [0, 5])
+def test_device_optimizer_matches_scipy(hidden):
+    x, y, _ = data()
+    ids = [str(j) for j in range(len(x))]
+    options = dict(
+        item_features=x,
+        item_ids=ids,
+        feature_item_ids=ids,
+        key=jax.random.key(5),
+        hidden_size=hidden,
+        l2=0.01,
+        max_iter=2000,
+        tolerance=1e-6,
+    )
+    device = amortized_irt(y, optimizer="jax", **options)
+    reference = amortized_irt(y, **{**options, "tolerance": 1e-11})
+    assert device.converged, device.message
+    assert reference.converged, reference.message
+    np.testing.assert_allclose(device.objective, reference.objective, atol=1e-7)
+    np.testing.assert_allclose(device.predict(x), reference.predict(x), atol=2e-4)
+    np.testing.assert_allclose(device.ability, reference.ability, atol=2e-4)
+    np.testing.assert_allclose(
+        device.ability_variance, reference.ability_variance, atol=2e-4
+    )
+    assert device.trace.shape == (2,)
+    limited = amortized_irt(y, optimizer="jax", **{**options, "max_iter": 1})
+    assert not limited.converged and limited.iterations == 1
+    assert "limit" in limited.message.lower()
+
+
+def test_encoder_kernel_reuses_layout_with_new_features():
+    from jirt.amortized import _value_grad
+
+    x, y, _ = data()
+    ids = [str(j) for j in range(len(x))]
+    options = dict(
+        item_ids=ids,
+        feature_item_ids=ids,
+        key=jax.random.key(5),
+        hidden_size=0,
+        max_iter=30,
+    )
+    _value_grad.clear_cache()
+    first = amortized_irt(y, item_features=x, **options)
+    size = _value_grad._cache_size()
+    second = amortized_irt(y, item_features=x[:, ::-1], **options)
+    assert _value_grad._cache_size() == size
+    # Reversing features must reverse fitted coefficients, not capture old data.
+    np.testing.assert_allclose(
+        first.params["output"], second.params["output"][::-1], atol=1e-5
+    )

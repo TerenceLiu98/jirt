@@ -4,8 +4,51 @@ import jax
 import jax.numpy as jnp
 from jax.scipy.special import log_ndtr, ndtr
 import numpy as np
+from ._iteration import run_explicit
 from .binary import Control, FitResult
 from .types import NetworkStarts, NetworkPriors
+
+
+def _network_step(state, data):
+    yy, observed, gamma, mus, vs, va, vb = data
+    a, b, w, t, vw, vt = state
+    distance = (t[:, None] - w[None, :]) ** 2
+    eta = a[None, :] + b[:, None] - gamma * distance
+    sign = jnp.where(yy == 1, 1.0, -1.0)
+    z = eta * sign
+    latent = eta + jnp.where(
+        observed,
+        sign * jnp.exp(-0.5 * z * z - 0.5 * jnp.log(2 * jnp.pi) - log_ndtr(z)),
+        0.0,
+    )
+    a = va * (
+        mus["alpha"] / vs["alpha"]
+        + jnp.sum(latent - b[:, None] + gamma * distance, axis=0)
+    )
+    b = vb * (
+        mus["beta"] / vs["beta"]
+        + jnp.sum(latent - a[None, :] + gamma * distance, axis=1)
+    )
+    residual = latent - a[None, :] - b[:, None]
+    d = t[:, None] - w[None, :]
+    curvature = 2 / vs["w"] + 4 * jnp.sum(
+        gamma * residual + 3 * gamma**2 * d * d, axis=0
+    )
+    gradient = 2 / vs["w"] * (w - mus["w"]) - 4 * jnp.sum(
+        gamma * d * residual + gamma**2 * d**3, axis=0
+    )
+    vw = 2 / curvature
+    w = w - gradient / curvature
+    d = t[:, None] - w[None, :]
+    curvature = 2 / vs["theta"] + 4 * jnp.sum(
+        gamma * residual + 3 * gamma**2 * d * d, axis=1
+    )
+    gradient = 2 / vs["theta"] * (t - mus["theta"]) + 4 * jnp.sum(
+        gamma * d * residual + gamma**2 * d**3, axis=1
+    )
+    vt = 2 / curvature
+    t = t - gradient / curvature
+    return a, b, w, t, vw, vt
 
 
 def network_irt(
@@ -62,67 +105,45 @@ def network_irt(
     va = 1 / (n + 1 / vs["alpha"])
     vb = 1 / (m + 1 / vs["beta"])
 
-    def step(state):
-        a, b, w, t, vw, vt = state
-        distance = (t[:, None] - w[None, :]) ** 2
-        eta = a[None, :] + b[:, None] - gamma * distance
-        sign = jnp.where(yy == 1, 1.0, -1.0)
-        z = eta * sign
-        latent = eta + jnp.where(
-            observed,
-            sign * jnp.exp(-0.5 * z * z - 0.5 * jnp.log(2 * jnp.pi) - log_ndtr(z)),
-            0.0,
-        )
-        a = va * (
-            mus["alpha"] / vs["alpha"]
-            + jnp.sum(latent - b[:, None] + gamma * distance, axis=0)
-        )
-        b = vb * (
-            mus["beta"] / vs["beta"]
-            + jnp.sum(latent - a[None, :] + gamma * distance, axis=1)
-        )
-        residual = latent - a[None, :] - b[:, None]
-        d = t[:, None] - w[None, :]
-        curvature = 2 / vs["w"] + 4 * jnp.sum(
-            gamma * residual + 3 * gamma**2 * d * d, axis=0
-        )
-        gradient = 2 / vs["w"] * (w - mus["w"]) - 4 * jnp.sum(
-            gamma * d * residual + gamma**2 * d**3, axis=0
-        )
-        vw = 2 / curvature
-        w = w - gradient / curvature
-        d = t[:, None] - w[None, :]
-        curvature = 2 / vs["theta"] + 4 * jnp.sum(
-            gamma * residual + 3 * gamma**2 * d * d, axis=1
-        )
-        gradient = 2 / vs["theta"] * (t - mus["theta"]) + 4 * jnp.sum(
-            gamma * d * residual + gamma**2 * d**3, axis=1
-        )
-        vt = 2 / curvature
-        t = t - gradient / curvature
-        return a, b, w, t, vw, vt
+    data = (yy, observed, jnp.asarray(gamma), mus, vs, jnp.asarray(va), jnp.asarray(vb))
 
-    update = jax.jit(step) if c.jit else step
+    def update(state):
+        return _network_step(state, data)
+
     state = (*map(jnp.asarray, arrays), jnp.full(m, vs["w"]), jnp.full(n, vs["theta"]))
-    history = []
-    converged = False
-    for iteration in range(1, c.max_iter + 1):
-        old = state
-        state = update(state)
-        if not all(np.isfinite(np.asarray(a)).all() for a in state):
-            raise FloatingPointError(f"Nonfinite update at iteration {iteration}")
-        errors = []
-        for u, v in zip(old[:4], state[:4]):
-            u, v = np.asarray(u), np.asarray(v)
-            errors.append(
-                float(max(0, 1 - np.corrcoef(u, v)[0, 1]))
-                if c.convergence == "correlation" and np.std(u) > 0 and np.std(v) > 0
-                else float(np.max(np.abs(u - v)))
-            )
-        history.append(errors)
-        if iteration > 1 and max(errors) < c.tolerance:
-            converged = True
-            break
+    if c.jit:
+        state, converged, iteration, history = run_explicit(
+            _network_step,
+            state,
+            data,
+            count=4,
+            max_iter=c.max_iter,
+            tolerance=c.tolerance,
+            correlation=c.convergence == "correlation",
+            min_iter=2,
+        )
+    else:
+        history = []
+        converged = False
+        for iteration in range(1, c.max_iter + 1):
+            old = state
+            state = update(state)
+            if not all(np.isfinite(np.asarray(a)).all() for a in state):
+                raise FloatingPointError(f"Nonfinite update at iteration {iteration}")
+            errors = []
+            for u, v in zip(old[:4], state[:4]):
+                u, v = np.asarray(u), np.asarray(v)
+                errors.append(
+                    float(max(0, 1 - np.corrcoef(u, v)[0, 1]))
+                    if c.convergence == "correlation"
+                    and np.std(u) > 0
+                    and np.std(v) > 0
+                    else float(np.max(np.abs(u - v)))
+                )
+            history.append(errors)
+            if iteration > 1 and max(errors) < c.tolerance:
+                converged = True
+                break
     a, b, w, t, vw, vt = state
     flip = (anchor_subject is not None and t[anchor_subject] < jnp.mean(t)) or (
         anchor_subject is None

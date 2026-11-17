@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from itertools import product
 
+from ._optimize import device_minimize
+
 import jax
 import jax.numpy as jnp
 import numpy as np
@@ -88,6 +90,7 @@ def multidimensional_irt(
     max_iter=1000,
     tolerance=1e-10,
     jit=True,
+    optimizer="scipy",
 ):
     """Fit compensatory 2PL, bifactor or random-intercept testlet IRT.
 
@@ -112,7 +115,13 @@ def multidimensional_irt(
     starts accepts a (J,D) and d (J,). anchors is a D-vector of item indices;
     defaults are diagonal for exploratory models, otherwise first allowed item.
     tolerance is SLSQP ftol on mean negative marginal log likelihood.
+    optimizer="scipy" retains SLSQP. optimizer="jax" requires jit=True and
+    uses device-side spectral projected gradient with the same constraints.
+    For JAX, tolerance bounds the unit-step projected-gradient infinity norm;
+    trace contains accepted iterates and may be nonmonotone. See PERFORMANCE.md.
     """
+    if optimizer not in ("scipy", "jax") or (optimizer == "jax" and not jit):
+        raise ValueError("optimizer must be scipy or jax; jax requires jit=True")
     if not jax.config.x64_enabled:
         raise ValueError("Enable JAX x64 before fitting")
     for value, name, minimum in (
@@ -250,15 +259,29 @@ def multidimensional_irt(
         return float(value), np.asarray(grad)
 
     history = [-objective(initial)[0] * len(y)]
-    optimum = minimize(
-        objective,
-        initial,
-        jac=True,
-        method="SLSQP",
-        bounds=list(zip(lower, np.full(len(lower), np.inf))),
-        callback=lambda raw: history.append(-objective(raw)[0] * len(y)),
-        options={"maxiter": max_iter, "ftol": tolerance},
-    )
+    if optimizer == "jax":
+        optimum = device_minimize(
+            _loss,
+            initial,
+            args,
+            lower=lower,
+            upper=np.full(len(lower), np.inf),
+            constraints=(),
+            config=(),
+            max_iter=max_iter,
+            tolerance=tolerance,
+        )
+        history = -optimum.trace * len(y)
+    else:
+        optimum = minimize(
+            objective,
+            initial,
+            jac=True,
+            method="SLSQP",
+            bounds=list(zip(lower, np.full(len(lower), np.inf))),
+            callback=lambda raw: history.append(-objective(raw)[0] * len(y)),
+            options={"maxiter": max_iter, "ftol": tolerance},
+        )
     raw = jnp.asarray(optimum.x)
     ll, posterior = (_score if jit else _posterior)(
         raw, args[0], args[1], args[3], args[4], args[5]
