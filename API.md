@@ -228,3 +228,54 @@ padding for nonexistent categories. Omitting theta uses EAP scores, as does the
 is a pure JAX function (make model static for JIT). It assumes valid shapes and
 constraints; PCM/RSM force unit slopes. Supply shared RSM steps when using this
 low-level function. Run `uv run python examples/polytomous.py` for all four models.
+
+## Nominal and nested response models
+
+`nominal_irt(responses, category_counts=..., answer_keys=None, model="nominal",
+starts=None, quadrature_points=41, max_iter=1000, tolerance=1e-10, jit=True)`
+fits unordered categories with fixed N(0,1) ability and no item priors. Counts
+are declared integers >=2 per item, response labels start at zero, and NaN
+marks missing responses. Unobserved declared categories are retained; they may
+lead to poorly identified or boundary estimates. Each item needs observations.
+
+`model="nominal"` uses category logits `slopes[j,k]*theta + intercepts[j,k]`
+and a stable softmax. Both coefficients of category zero are fixed to zero for
+each item, removing arbitrary common shifts. The item-zero/category-one slope
+is constrained >=1e-6 to fix the ability sign. Choose that anchor by reordering
+items/categories if necessary; category labels have no inherent order. Other
+category slopes are unrestricted. Location and scale are fixed by N(0,1).
+
+For nested models, choose `model="2pl"`, `"3pl"`, `"3plu"` or `"4pl"` and
+supply zero-based `answer_keys` of item length. Correct-answer probability is
+`q=c+(u-c)*sigmoid(a*(theta-b))`. 2PL fixes c=0,u=1; 3PL estimates c; 3PLu
+estimates u only; 4PL estimates both. Slopes satisfy a>=1e-6. Fitted asymptotes
+lie in [1e-6,1-1e-6], with u-c>=1e-6 for 4PL. Each incorrect category receives
+`(1-q)*softmax(distractor logits)`. Thus summing distractors exactly yields
+1-q, while the key receives q. With one distractor the model reduces to the
+specified binary response curve. Correct-option nominal coefficients and both
+coefficients of the first non-key category are fixed at zero. Distractor slopes
+are otherwise unrestricted; the positive correct curve fixes latent direction.
+
+`starts` accepts `slopes` and `intercepts`, padded `(J,max(K))` arrays, plus free
+binary parameters `a`, `b`, `c`, `u` as `(J,)` arrays for nested models. Reference,
+key and padding entries must be zero. Defaults are free category slopes 0.5,
+category intercepts zero, a=1,b=0,c=0.1,u=0.9 where applicable. No ordering
+constraints are imposed on unordered categories or distractors.
+
+`NominalResult.means` returns category coefficients, EAP `x`, and the binary
+parameters for nested fits. `variances["x"]` gives conditional posterior
+variance, excluding item calibration uncertainty. Fully missing subjects retain
+the N(0,1) prior. Prediction has shape `(N,J,max(K))`, with zero probability for
+padding. `predict(theta)` uses supplied ability values; omitting them, or using
+`probabilities`, returns EAP plug-in predictions. `category_counts` and
+`answer_keys` preserve the input coding. SLSQP uses JAX derivatives and Gaussian
+quadrature; tolerance is ftol on mean negative marginal likelihood. Check
+`converged`, `iterations`, `message`, `trace` and total `log_likelihood`.
+
+`nominal_probabilities` and `nested_probabilities` expose pure JAX probability
+functions with matching keyword parameters. They assume valid inputs and allow
+equivalent common shifts of category coefficients. Padded coefficients can be
+NaN in these low-level functions; the fitting interface requires zero padding.
+Use multiple starts and quadrature checks for weakly identified fits, particularly
+nested 3PL/4PL. See `uv run python examples/nominal.py` for a distractor-analysis
+example covering all five configurations with varying keys and category counts.

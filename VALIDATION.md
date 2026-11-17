@@ -390,3 +390,61 @@ uv run python examples/polytomous.py
 Generated reports stay in ignored `outputs/polytomous/`; only the reproducible
 regression fixture is tracked. These small matched cases validate implementation
 agreement, not global optimization or identification for arbitrary sparse data.
+
+## Nominal and nested distractor models
+
+`nominal_irt` implements Bock's nominal response model and nested logistic
+models with 2PL, 3PL, 3PLu or full 4PL correct-answer curves. Unit tests cover
+softmax normalization, common-logit-shift invariance, varying category counts,
+all four exact distractor-collapse identities, extreme abilities, binary nested
+reduction, reference constraints, missing/unobserved categories, and JIT/eager
+agreement. The runnable example covers all five fitting configurations.
+
+Independent reference fits use R mirt 1.48.5, source commit
+`211851adae7a6bee580af830d37187f0e81a5ca8`, R 4.5.1. Five-item synthetic tables
+have category counts 3,4,3,4,3 and approximately 300,000 observations each.
+Nested answer keys vary by item. Independent SciPy softmax/expit formulas
+produce deterministic rounded response-pattern frequencies. Both packages fix
+N(0,1), use no item priors, the same 41-point Gauss–Hermite rule and neutral
+starts. mirt uses EM/nlminb without acceleration, TOL=1e-8; jirt uses SLSQP,
+mean-loss tolerance 1e-13. All five pairs report convergence.
+
+For mirt nominal items the multiplicative a1 is fixed to one and category
+coefficients ak are freed except the zero reference, matching jirt's direct
+category slopes. The default last-category ak constraint is removed. The first
+item/category-one slope is positive. Nested types are `2PLNRM`, `3PLNRM`,
+`3PLuNRM`, `4PLNRM`: distractor coefficients exclude the key and fix the first
+non-key option. Binary intercept d converts to difficulty b=-d/a. Marginal
+asymptote bounds match; mirt lacks the coupled 4PL gap constraint, so valid
+exported gaps are required by the probability tests' model inputs.
+
+| Model | Maximum parameter difference | Maximum probability difference | Total log-likelihood difference |
+| --- | ---: | ---: | ---: |
+| Nominal | 2.92e-6 | 6.90e-7 | 3.33e-8 |
+| Nested 2PL | 2.01e-6 | 5.15e-7 | 4.80e-8 |
+| Nested 3PL | 9.09e-5 | 2.08e-5 | 9.81e-7 |
+| Nested 3PLu | 2.13e-4 | 1.29e-4 | 6.82e-6 |
+| Nested 4PL | 2.43e-3 | 1.21e-3 | 8.96e-5 |
+
+Probabilities use 41 abilities over [-4,4]. Fixed-parameter probability agreement
+is within 2.3e-15 for every model. Regression tests also check fixed-parameter
+likelihood, EAP and posterior variance. Independent nominal/2PL fits are checked
+for strict parameter agreement. For asymptote models the tests require a
+converged JAX objective at least as good as the R fit within numerical tolerance;
+this is **not** a claim of parameter parity or global optimality. The table
+preserves the remaining fitting differences rather than hiding them with wider
+parameter tolerances. These data do not establish broad statistical recovery.
+
+```sh
+sh scripts/build_mirt_reference.sh
+uv run python scripts/prepare_nominal_reference.py
+Rscript --vanilla scripts/export_nominal_reference.R
+uv run python scripts/check_nominal_reference.py
+# After reviewing the report:
+cp outputs/nominal/fixture.json tests/fixtures/nominal_mirt.json
+uv run pytest tests/test_nominal.py tests/test_nominal_mirt.py
+uv run python examples/nominal.py
+```
+
+Generated reports and R installation stay in ignored outputs/. R is not needed
+for routine tests. The reference repositories are unchanged.

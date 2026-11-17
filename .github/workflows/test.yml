@@ -37,4 +37,5 @@ jobs:
       - run: uv run python examples/logistic.py
       - run: uv run python examples/multidimensional.py
       - run: uv run python examples/polytomous.py
+      - run: uv run python examples/nominal.py
       - run: uv build
