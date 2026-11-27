@@ -2,24 +2,25 @@
 
 [![Tests](https://github.com/TerenceLiu98/jirt/actions/workflows/test.yml/badge.svg?branch=main)](https://github.com/TerenceLiu98/jirt/actions/workflows/test.yml)
 [![Python](https://img.shields.io/badge/python-%3E%3D3.12-blue?logo=python&logoColor=white)](https://www.python.org/)
-[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](LICENSE)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](https://github.com/TerenceLiu98/jirt/blob/main/LICENSE)
 [![JAX](https://img.shields.io/badge/powered%20by-JAX-orange)](https://docs.jax.dev/)
 [![uv](https://img.shields.io/badge/managed%20with-uv-DE5FE9)](https://docs.astral.sh/uv/)
 
 Item response theory in Python and JAX, with binary, ordinal, dynamic,
 hierarchical, network and Poisson models, plus logistic Rasch/1PL–4PL calibration.
 
-## Environment
+## Installation
 
-Python 3.12, managed by uv:
+Use Python 3.12 or later on a platform with compatible
+[JAX wheels](https://docs.jax.dev/en/latest/installation.html#supported-platforms).
+On macOS, the required JAX version provides wheels for Apple Silicon.
 
 ```sh
-uv sync --locked
-uv run pytest
-uv build
+python -m pip install jirt
 ```
 
-Dependencies are pinned in `uv.lock`; uv creates an isolated `.venv`.
+## Quick start
+
 Numerical fitting requires 64-bit JAX. Enable it before creating arrays:
 
 ```python
@@ -41,7 +42,7 @@ print(result.means["x"], result.converged)
 ```
 
 For execution modes, optional device-side optimizers, and stopping rules, see
-[Performance](PERFORMANCE.md).
+[Performance](https://github.com/TerenceLiu98/jirt/blob/main/PERFORMANCE.md).
 
 ## Models
 
@@ -119,7 +120,19 @@ zero inflation.
 unseen items without responses. Run `uv run python examples/amortized.py` for
 an entire-item holdout comparison against a non-amortized 1PL baseline.
 
-See [API.md](API.md) for parameter shapes and identification constraints.
+See the [API reference](https://github.com/TerenceLiu98/jirt/blob/main/API.md)
+for parameter shapes and identification constraints.
+
+## Development
+
+From the repository checkout, use uv to create an isolated `.venv` with the
+dependencies pinned in `uv.lock`:
+
+```sh
+uv sync --locked
+uv run pytest
+uv build
+```
 
 ## TODO
 
