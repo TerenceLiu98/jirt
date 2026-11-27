@@ -150,11 +150,7 @@ difficulty prediction against non-amortized baselines on their own item banks.
 
 # AI usage disclosure
 
-OpenAI Codex 5.6 Sol assisted with organizing and refactoring the codebase.
-OpenAI Codex (GPT-5 family) assisted with drafting and editing this manuscript,
-locating references, and verifying technical claims against the repository's
-code and validation records. Human author review, editing, and confirmation of
-all design decisions and claims are pending prior to submission.
+OpenAI GPT-5.6-Sol assisted with organizing and refactoring the codebase. GPT-5.6-Sol helped collecting references and validate the codebase performance in multiple platform. Gemini Hydrogen helped polishing manuscript's grammar and phase usage.  the The author is responsible for reviewing the polished text, verifying the evidence, and approving the final submission.
 
 # Acknowledgements
 
